@@ -47,6 +47,7 @@ final class Hooks
         add_action('admin_post_osct_save_settings', [$this, 'handleSaveSettings']);
         add_action('admin_post_osct_do_translate',  [$this, 'handleTranslate']);
         add_action('admin_post_osct_do_dry_run',     [$this, 'handleDryRun']);
+        add_action('admin_post_osct_delete_job_translation', [$this, 'handleDeleteJobTranslation']);
 
         (new BlockSyncService())->register();
 
@@ -172,6 +173,39 @@ final class Hooks
         $res = $this->translator->dryRun();
         set_transient('osct_dry_result', $res, 120);
         wp_redirect(add_query_arg(['page' => 'osct-dry-run'], admin_url('admin.php')));
+        exit;
+    }
+
+    public function handleDeleteJobTranslation(): void
+    {
+        if (!current_user_can('manage_options')) wp_die();
+        check_admin_referer('osct_delete_job_translation');
+
+        $jobId = isset($_GET['job_id']) ? sanitize_text_field(wp_unslash($_GET['job_id'])) : '';
+        $lang  = isset($_GET['lang']) ? sanitize_text_field(wp_unslash($_GET['lang'])) : '';
+
+        $repo = new JobsRepo();
+        $deleted = false;
+
+        if ($jobId !== '' && $lang !== '') {
+            $deleted = $repo->deleteTranslation($jobId, $lang);
+        }
+
+        $redirect = isset($_GET['redirect_to']) ? urldecode((string)wp_unslash($_GET['redirect_to'])) : '';
+        $redirect = esc_url_raw($redirect);
+
+        if (!$redirect) {
+            $redirect = add_query_arg(['page' => 'osct-jobs'], admin_url('admin.php'));
+        }
+
+        $redirect = remove_query_arg(['deleted', 'deleted_job', 'deleted_lang'], $redirect);
+        $redirect = add_query_arg([
+            'deleted'      => $deleted ? '1' : '0',
+            'deleted_job'  => $jobId,
+            'deleted_lang' => $lang,
+        ], $redirect);
+
+        wp_safe_redirect($redirect);
         exit;
     }
 }
