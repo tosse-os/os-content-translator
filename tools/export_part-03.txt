@@ -1,767 +1,823 @@
-Datei: src\Domain\Repos\LogRepo.php
+Datei: includes\dashboard.php
 <?php
-namespace OSCT\Domain\Repos;
 if (!defined('ABSPATH')) exit;
 
-final class LogRepo {
-    private function table(): string {
-        global $wpdb; return $wpdb->prefix . 'osct_translation_log';
-    }
-
-    public function insert(array $row): void {
-        global $wpdb;
-        $wpdb->insert($this->table(), [
-            'run_id'         => $row['run_id'],
-            'post_id'        => (int)$row['post_id'],
-            'post_type'      => $row['post_type'],
-            'source_lang'    => $row['source_lang'],
-            'target_lang'    => $row['target_lang'],
-            'provider'       => $row['provider'],
-            'action'         => $row['action'],
-            'status'         => $row['status'],
-            'words_title'    => (int)$row['words_title'],
-            'chars_title'    => (int)$row['chars_title'],
-            'words_content'  => (int)$row['words_content'],
-            'chars_content'  => (int)$row['chars_content'],
-            'src_hash'       => $row['src_hash'],
-            'message'        => $row['message'],
-            'created_at'     => current_time('mysql', 1),
-        ]);
-    }
-
-    public function list(array $args=[]): array {
-        global $wpdb;
-        $table = $this->table();
-        $where = '1=1';
-        $params = [];
-        if (!empty($args['search'])) {
-            $where .= ' AND (post_id = %d OR target_lang = %s)';
-            $params[] = (int)$args['search'];
-            $params[] = $args['search'];
+function osct_get_languages() {
+    $out = [];
+    if (function_exists('pll_languages_list')) {
+        $objs = pll_languages_list(['fields'=>'objects']);
+        if (is_array($objs) && !empty($objs)) {
+            foreach ($objs as $o) {
+                if (is_object($o) && !empty($o->slug)) {
+                    $out[$o->slug] = (object)[
+                        'slug'=>$o->slug,
+                        'name'=>isset($o->name)?$o->name:$o->slug,
+                        'locale'=>isset($o->locale)?$o->locale:$o->slug
+                    ];
+                }
+            }
         }
-        if (!empty($args['from'])) {
-            $where .= ' AND created_at >= %s';
-            $params[] = $args['from'];
+        if (empty($out)) {
+            $slugs = pll_languages_list();
+            if (is_array($slugs)) {
+                foreach ($slugs as $slug) if (!empty($slug)) $out[$slug]=(object)['slug'=>$slug,'name'=>strtoupper($slug),'locale'=>$slug];
+            }
         }
-        if (!empty($args['to'])) {
-            $where .= ' AND created_at <= %s';
-            $params[] = $args['to'];
+    }
+    if (empty($out)) {
+        $opt = get_option('polylang');
+        if (is_array($opt) && !empty($opt['languages'])) {
+            foreach ($opt['languages'] as $slug=>$row) $out[$slug]=(object)['slug'=>$slug,'name'=>isset($row['name'])?$row['name']:$slug,'locale'=>isset($row['locale'])?$row['locale']:$slug];
+        } elseif (!empty($opt['default_lang'])) {
+            $slug=$opt['default_lang']; $out[$slug]=(object)['slug'=>$slug,'name'=>strtoupper($slug),'locale'=>$slug];
         }
-        $paged = max(1, (int)($args['paged'] ?? 1));
-        $pp    = max(1, (int)($args['per_page'] ?? 50));
-        $off   = ($paged-1)*$pp;
+    }
+    ksort($out);
+    return $out;
+}
 
-        $sql = "SELECT SQL_CALC_FOUND_ROWS * FROM $table WHERE $where ORDER BY id DESC LIMIT %d OFFSET %d";
-        $params[] = $pp;
-        $params[] = $off;
+function osct_status_badge($state){
+    if($state==='ok') return '<span style="color:#0a0">OK</span>';
+    if($state==='stale') return '<span style="color:#e69500">Veraltet</span>';
+    return '<span style="color:#a00">Fehlt</span>';
+}
 
-        $rows = $wpdb->get_results($wpdb->prepare($sql, $params), ARRAY_A);
-        $total = (int)$wpdb->get_var('SELECT FOUND_ROWS()');
+function osct_render_dashboard() {
+    $o = get_option('osct_settings', []);
+    $langs = osct_get_languages();
+    $active = isset($o['languages_active']) ? (array)$o['languages_active'] : [];
+    $menu_id = isset($o['menu_id']) ? (int)$o['menu_id'] : 0;
+    $wl_menu = isset($o['page_whitelist']) ? (array)$o['page_whitelist'] : [];
+    $wl_extra = isset($o['page_whitelist_extra']) ? (array)$o['page_whitelist_extra'] : [];
+    $wl_blocks = isset($o['block_whitelist']) ? (array)$o['block_whitelist'] : [];
+    $whitelist_pages = array_values(array_unique(array_map('intval', array_merge($wl_menu,$wl_extra))));
+    $whitelist_all = array_values(array_unique(array_map('intval', array_merge($whitelist_pages,$wl_blocks))));
+    $menu_name = $menu_id ? wp_get_nav_menu_object($menu_id)->name : '';
+    $total_pages = count($whitelist_pages);
+    $total_blocks = count($wl_blocks);
 
-        return ['rows'=>$rows,'total'=>$total,'paged'=>$paged,'per_page'=>$pp];
+    $tr = get_transient('osct_translate_result');
+    delete_transient('osct_translate_result');
+
+    echo '<div class="wrap">';
+    echo '<h1>OS Content Translator – Dashboard</h1>';
+
+    if ($tr && is_array($tr)) {
+        echo '<div class="notice notice-success is-dismissible"><p>Übersetzung abgeschlossen. Neu: '.intval($tr['created']).', übersprungen: '.intval($tr['skipped']).'.</p></div>';
     }
 
-    public function sums(array $args=[]): array {
-        global $wpdb;
-        $table = $this->table();
-        $where = '1=1';
-        $params = [];
-        if (!empty($args['from'])) { $where.=' AND created_at >= %s'; $params[]=$args['from']; }
-        if (!empty($args['to']))   { $where.=' AND created_at <= %s'; $params[]=$args['to']; }
-        $sql = "SELECT
-            COUNT(*) as entries,
-            SUM(words_title+words_content) as words,
-            SUM(chars_title+chars_content) as chars
-            FROM $table WHERE $where";
-        $row = $wpdb->get_row($wpdb->prepare($sql,$params), ARRAY_A);
-        return [
-            'entries'=>(int)($row['entries'] ?? 0),
-            'words'  =>(int)($row['words'] ?? 0),
-            'chars'  =>(int)($row['chars'] ?? 0),
-        ];
+    echo '<h2>Status</h2>';
+    echo '<table class="widefat striped"><tbody>';
+    echo '<tr><td>Aktives Menü</td><td>'.($menu_id?esc_html($menu_name).' (#'.(int)$menu_id.')':'–').'</td></tr>';
+    echo '<tr><td>Freigegebene Seiten (gesamt)</td><td>'.(int)$total_pages.'</td></tr>';
+    echo '<tr><td>Freigegebene Reusable Blocks</td><td>'.(int)$total_blocks.'</td></tr>';
+    echo '<tr><td>Aktive Zielsprachen</td><td>'.esc_html(implode(', ', $active)).'</td></tr>';
+    echo '</tbody></table>';
+
+    echo '<h2>Schneller Trockenlauf</h2>';
+    echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'">';
+    echo '<input type="hidden" name="action" value="osct_do_dry_run">';
+    wp_nonce_field('osct_do_dry_run');
+    echo '<p>Führt einen Trockenlauf für alle freigegebenen Seiten und Blöcke in die aktiven Zielsprachen aus, ohne Inhalte anzulegen.</p>';
+    echo '<p><a class="button button-secondary" href="'.esc_url(add_query_arg(['page'=>'osct-dry-run'], admin_url('admin.php'))).'">Erweiterter Trockenlauf</a> ';
+    echo '<button class="button button-primary">Trockenlauf starten</button></p>';
+    echo '</form>';
+
+    echo '<h2>Übersetzung starten</h2>';
+    echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'">';
+    echo '<input type="hidden" name="action" value="osct_do_translate">';
+    wp_nonce_field('osct_do_translate');
+    echo '<p>Übersetzt fehlende oder veraltete Zielsprachen. Bestehende, aktuelle Übersetzungen werden übersprungen.</p>';
+    echo '<p><button class="button button-primary">Übersetzung jetzt ausführen</button> ';
+    echo '<a class="button" href="'.esc_url(add_query_arg(['page'=>'osct-settings'], admin_url('admin.php'))).'">Einstellungen</a></p>';
+    echo '</form>';
+
+    echo '<h2>Seiten × Sprachen</h2>';
+    if (!empty($active) && !empty($whitelist_pages)) {
+        echo '<table class="widefat striped"><thead><tr><th>Seite</th>';
+        foreach($active as $lang) echo '<th>'.esc_html($lang).'</th>';
+        echo '</tr></thead><tbody>';
+        $posts = get_posts(['post_type'=>'page','post__in'=>$whitelist_pages,'posts_per_page'=>-1,'orderby'=>'post__in']);
+        foreach ($posts as $p) {
+            echo '<tr>';
+            echo '<td>#'.(int)$p->ID.' '.esc_html(get_the_title($p)).'</td>';
+            foreach($active as $lang){
+                $state = osct_translation_state($p->ID,$lang);
+                echo '<td>'.osct_status_badge($state).'</td>';
+            }
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+    } else {
+        echo '<p>Keine freigegebenen Seiten oder keine Zielsprachen aktiv.</p>';
     }
 
-    public function exportCsv(array $args=[]): string {
-        $data = $this->list(array_merge($args,['per_page'=>100000,'paged'=>1]));
-        $rows = $data['rows'];
-        $fh = fopen('php://temp', 'w+');
-        fputcsv($fh, ['id','run_id','post_id','post_type','source_lang','target_lang','provider','action','status','words_title','chars_title','words_content','chars_content','src_hash','message','created_at']);
-        foreach ($rows as $r) fputcsv($fh, $r);
-        rewind($fh);
-        return stream_get_contents($fh);
+    echo '<h2>Reusable Blocks × Sprachen</h2>';
+    if (!empty($active) && !empty($wl_blocks)) {
+        echo '<table class="widefat striped"><thead><tr><th>Block</th>';
+        foreach($active as $lang) echo '<th>'.esc_html($lang).'</th>';
+        echo '</tr></thead><tbody>';
+        $blocks = get_posts(['post_type'=>'wp_block','post__in'=>$wl_blocks,'posts_per_page'=>-1,'orderby'=>'post__in']);
+        foreach ($blocks as $b) {
+            echo '<tr>';
+            echo '<td>#'.(int)$b->ID.' '.esc_html(get_the_title($b)).'</td>';
+            foreach($active as $lang){
+                $state = osct_translation_state($b->ID,$lang);
+                echo '<td>'.osct_status_badge($state).'</td>';
+            }
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+    } else {
+        echo '<p>Keine freigegebenen Reusable Blocks oder keine Zielsprachen aktiv.</p>';
     }
 
-    public function lastRunId(): ?string
-    {
-        global $wpdb;
-        $table = $this->table();
-        $run = $wpdb->get_var("SELECT run_id FROM $table ORDER BY id DESC LIMIT 1");
-        return $run ?: null;
+    if (!empty($whitelist_all)) {
+        echo '<h2>Freigegebene Inhalte</h2>';
+        echo '<table class="widefat striped"><thead><tr><th>ID</th><th>Titel</th><th>Permalink</th><th>Typ</th><th>Quelle</th></tr></thead><tbody>';
+        $posts = get_posts(['post_type'=>['page','wp_block'],'post__in'=>$whitelist_all,'posts_per_page'=>-1,'orderby'=>'post__in']);
+        foreach ($posts as $p) {
+            $src = in_array($p->ID,$wl_menu,true) ? 'Menü' : (in_array($p->ID,$wl_blocks,true) ? 'Block' : 'Manuell');
+            $link = $p->post_type==='wp_block' ? get_edit_post_link($p->ID,'') : get_permalink($p);
+            echo '<tr>';
+            echo '<td>#'.(int)$p->ID.'</td>';
+            echo '<td>'.esc_html(get_the_title($p)).'</td>';
+            echo '<td>'.($link?'<a href="'.esc_url($link).'" target="_blank">'.esc_html($link).'</a>':'–').'</td>';
+            echo '<td>'.esc_html($p->post_type).'</td>';
+            echo '<td>'.esc_html($src).'</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
     }
 
-    public function lastRunJobSummary(): array
-    {
-        global $wpdb;
-        $table = $this->table();
-        $runId = $this->lastRunId();
-        if (!$runId) return ['entries' => 0, 'words' => 0, 'chars' => 0];
-        $sql = "SELECT
-        COUNT(*) as entries,
-        SUM(words_title+words_content) as words,
-        SUM(chars_title+chars_content) as chars
-        FROM $table
-        WHERE run_id = %s AND post_type = 'job' AND action IN ('create','update')";
-        $row = $wpdb->get_row($wpdb->prepare($sql, $runId), ARRAY_A);
-        return [
-            'entries' => (int)($row['entries'] ?? 0),
-            'words'  => (int)($row['words'] ?? 0),
-            'chars'  => (int)($row['chars'] ?? 0),
-        ];
-    }
+    echo '</div>';
 }
 
 
-Datei: src\Domain\Repos\OptionRepo.php
+Datei: includes\dry-run.php
 <?php
-namespace OSCT\Domain\Repos;
 if (!defined('ABSPATH')) exit;
 
-final class OptionRepo {
-    private string $key = 'osct_settings';
+function osct_src_lang() {
+    $opt = get_option('polylang');
+    if (!empty($opt['default_lang'])) return $opt['default_lang'];
+    return 'en';
+}
 
-    private array $defaults = [
-        'provider_default'    => 'google',
-        'provider_override'   => [],       // NEU: Map [lang => google|deepl]
-        'api_google'          => '',
-        'api_deepl'           => '',
-        'languages_active'    => [],
-        'menu_id'             => 0,
-        'page_whitelist'      => [],
-        'page_whitelist_extra'=> [],
-        'block_whitelist'     => [],
-        'slug_translate'      => 0,
-        'review_as_draft'     => 1,
-        'only_new'            => 0,        // optional (zukunft)
+function osct_dry_active_target_langs() {
+    $o = get_option('osct_settings', []);
+    $active = isset($o['languages_active']) && is_array($o['languages_active']) ? $o['languages_active'] : [];
+    $src = osct_src_lang();
+    $active = array_values(array_unique(array_filter($active)));
+    return array_values(array_diff($active, [$src]));
+}
+
+function osct_dry_whitelist_pages() {
+    $o = get_option('osct_settings', []);
+    $ids = isset($o['page_whitelist']) && is_array($o['page_whitelist']) ? array_map('intval',$o['page_whitelist']) : [];
+    if (empty($ids)) return [];
+    $posts = get_posts(['post_type'=>'page','post__in'=>$ids,'posts_per_page'=>-1,'orderby'=>'post__in','post_status'=>'publish']);
+    $out = [];
+    foreach ($posts as $p) $out[$p->ID] = $p->post_title;
+    return $out;
+}
+
+function osct_all_lang_names() {
+    $out = [];
+    if (function_exists('pll_languages_list')) {
+        $objs = pll_languages_list(['fields'=>'objects']);
+        if (is_array($objs)) {
+            foreach ($objs as $o) if (is_object($o) && !empty($o->slug)) $out[$o->slug] = $o->name ?: $o->slug;
+        }
+    }
+    if (empty($out)) {
+        $opt = get_option('polylang');
+        if (!empty($opt['default_lang'])) $out[$opt['default_lang']] = strtoupper($opt['default_lang']);
+    }
+    ksort($out);
+    return $out;
+}
+
+function osct_render_dry_run() {
+    $pages = osct_dry_whitelist_pages();
+    $target_defaults = osct_dry_active_target_langs();
+    $names = osct_all_lang_names();
+    $result = get_transient('osct_dry_result');
+    delete_transient('osct_dry_result');
+
+    echo '<div class="wrap"><h1>OS Content Translator – Trockenlauf</h1>';
+
+    if ($result && is_array($result)) {
+        echo '<h2>Ergebnis</h2>';
+        echo '<table class="widefat striped"><thead><tr><th>Seite</th><th>Sprache</th><th>Titel (Beispiel)</th><th>Zeichen Titel</th><th>Zeichen Inhalt</th><th>Fehler</th></tr></thead><tbody>';
+        foreach ($result as $row) {
+            echo '<tr>';
+            echo '<td>#'.(int)$row['post_id'].' '.esc_html($row['post_title']).'</td>';
+            echo '<td>'.esc_html($row['lang']).'</td>';
+            echo '<td>'.esc_html($row['title_sample']).'</td>';
+            echo '<td>'.(int)$row['title_len'].'</td>';
+            echo '<td>'.(int)$row['content_len'].'</td>';
+            echo '<td>'.($row['error'] ? '<span style="color:#a00">'.esc_html($row['error']).'</span>' : '–').'</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+    }
+
+    echo '<h2>Auswahl</h2>';
+    echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'">';
+    echo '<input type="hidden" name="action" value="osct_do_dry_run">';
+    wp_nonce_field('osct_do_dry_run');
+
+    echo '<table class="form-table"><tbody>';
+
+    echo '<tr><th>Seiten</th><td>';
+    if (!empty($pages)) {
+        foreach ($pages as $id=>$title) {
+            echo '<label style="display:block;margin:4px 0"><input type="checkbox" name="pages[]" value="'.esc_attr($id).'" checked> '.esc_html($title).' (#'.(int)$id.')</label>';
+        }
+    } else {
+        echo '<em>Keine freigegebenen Seiten. Bitte in den Einstellungen Menü wählen und Seiten freischalten.</em>';
+    }
+    echo '</td></tr>';
+
+    echo '<tr><th>Sprachen</th><td>';
+    if (!empty($names)) {
+        if (empty($target_defaults)) {
+            echo '<em>Keine Zielsprachen aktiv. Bitte unter „Einstellungen → Zielsprachen“ aktivieren.</em>';
+        } else {
+            foreach ($names as $slug=>$label) {
+                if (!in_array($slug, $target_defaults, true)) continue;
+                echo '<label style="display:inline-block;margin:4px 16px 4px 0"><input type="checkbox" name="langs[]" value="'.esc_attr($slug).'" checked> '.esc_html($label).' ('.esc_html($slug).')</label>';
+            }
+        }
+    } else {
+        echo '<em>Keine Sprachen gefunden.</em>';
+    }
+    echo '</td></tr>';
+
+    echo '</tbody></table>';
+
+    echo '<p><button class="button button-primary">Trockenlauf starten</button> <a class="button" href="'.esc_url(add_query_arg(['page'=>'osct-settings'], admin_url('admin.php'))).'">Einstellungen</a></p>';
+
+    echo '</form></div>';
+}
+
+function osct_handle_dry_run() {
+    if (!current_user_can('manage_options')) wp_die();
+    if (!isset($_POST['_wpnonce']) || !wp_verify_nonce($_POST['_wpnonce'],'osct_do_dry_run')) wp_die();
+
+    $pages = isset($_POST['pages']) && is_array($_POST['pages']) ? array_map('intval', $_POST['pages']) : [];
+    $langs = isset($_POST['langs']) && is_array($_POST['langs']) ? array_map('sanitize_text_field', $_POST['langs']) : [];
+    if (empty($pages)) $pages = array_keys(osct_dry_whitelist_pages());
+    if (empty($langs)) $langs = osct_dry_active_target_langs();
+
+    $src_lang = osct_src_lang();
+    $out = [];
+
+    foreach ($pages as $pid) {
+        $p = get_post($pid);
+        if (!$p || $p->post_type !== 'page' || $p->post_status !== 'publish') continue;
+        $title = get_the_title($pid);
+        $content = wp_strip_all_tags($p->post_content);
+        $srcTitleLen = mb_strlen($title);
+        $srcContentLen = mb_strlen($content);
+
+        foreach ($langs as $lang) {
+            if ($lang === $src_lang) continue;
+            $t1 = function_exists('osct_api_translate') ? osct_api_translate($title, $lang, $src_lang) : ['ok'=>false,'text'=>'','error'=>'API fehlt'];
+            $t2 = function_exists('osct_api_translate') ? osct_api_translate($content, $lang, $src_lang) : ['ok'=>false,'text'=>'','error'=>'API fehlt'];
+
+            $titleText = $t1['ok'] ? $t1['text'] : '';
+            $contentText = $t2['ok'] ? $t2['text'] : '';
+            $err = $t1['ok'] && $t2['ok'] ? '' : trim(($t1['error']?:'').' '.($t2['error']?:''));
+
+            $out[] = [
+                'post_id' => $pid,
+                'post_title' => $title,
+                'lang' => $lang,
+                'title_sample' => $titleText !== '' ? mb_substr($titleText, 0, 120) : '',
+                'title_len' => $titleText !== '' ? mb_strlen($titleText) : $srcTitleLen,
+                'content_len' => $contentText !== '' ? mb_strlen($contentText) : $srcContentLen,
+                'error' => $err
+            ];
+        }
+    }
+
+    set_transient('osct_dry_result', $out, 300);
+    wp_redirect(add_query_arg(['page'=>'osct-dry-run'], admin_url('admin.php')));
+    exit;
+}
+add_action('admin_post_osct_do_dry_run','osct_handle_dry_run');
+
+
+Datei: includes\log-handler.php
+<?php
+if (! defined('ABSPATH')) exit;
+
+class OSCT_Log_Handler
+{
+  public static function log($message, $type = 'info')
+  {
+    // store in option or transient
+  }
+  public static function get_logs()
+  {
+    // return logs
+  }
+}
+
+
+Datei: includes\settings.php
+<?php
+if (!defined('ABSPATH')) exit;
+
+function osct_settings_get() {
+    $o = get_option('osct_settings', []);
+    if (!is_array($o)) $o = [];
+    $o += [
+        'provider_default' => 'google',
+        'api_google' => '',
+        'api_deepl' => '',
+        'languages_active' => [],
+        'provider_override' => [],
+        'post_types' => [],
+        'slug_translate' => 0,
+        'review_as_draft' => 1,
+        'only_new' => 0,
+        'menu_id' => 0,
+        'page_whitelist' => [],
+        'page_whitelist_extra' => [],
+        'block_whitelist' => []
+    ];
+    return $o;
+}
+
+function osct_settings_langs() {
+    $out = [];
+    if (function_exists('pll_languages_list')) {
+        $objs = pll_languages_list(['fields'=>'objects']);
+        if (is_array($objs) && !empty($objs)) {
+            foreach ($objs as $o) {
+                if (is_object($o) && !empty($o->slug)) {
+                    $out[$o->slug] = ['slug'=>$o->slug,'name'=>isset($o->name)?$o->name:$o->slug,'locale'=>isset($o->locale)?$o->locale:$o->slug];
+                }
+            }
+        }
+        if (empty($out)) {
+            $slugs = pll_languages_list();
+            if (is_array($slugs)) {
+                foreach ($slugs as $s) if (!empty($s)) $out[$s] = ['slug'=>$s,'name'=>strtoupper($s),'locale'=>$s];
+            }
+        }
+    }
+    if (empty($out)) {
+        $opt = get_option('polylang');
+        if (is_array($opt) && !empty($opt['languages'])) {
+            foreach ($opt['languages'] as $slug=>$row) {
+                $out[$slug] = ['slug'=>$slug,'name'=>isset($row['name'])?$row['name']:$slug,'locale'=>isset($row['locale'])?$row['locale']:$slug];
+            }
+        } elseif (!empty($opt['default_lang'])) {
+            $slug = $opt['default_lang'];
+            $out[$slug] = ['slug'=>$slug,'name'=>strtoupper($slug),'locale'=>$slug];
+        }
+    }
+    ksort($out);
+    return $out;
+}
+
+function osct_settings_post_types() {
+    $pts = get_post_types(['public'=>true],'objects');
+    $out = [];
+    foreach ($pts as $k=>$obj) $out[$k] = isset($obj->labels->name)?$obj->labels->name:$k;
+    ksort($out);
+    return $out;
+}
+
+function osct_settings_menus() {
+    $menus = wp_get_nav_menus();
+    $out = [];
+    foreach ($menus as $m) $out[(int)$m->term_id] = $m->name;
+    return $out;
+}
+
+function osct_settings_menu_pages($menu_id) {
+    $ids = [];
+    $menu_id = (int)$menu_id;
+    if ($menu_id <= 0) return [];
+    $items = wp_get_nav_menu_items($menu_id, ['update_post_term_cache'=>false]);
+    if (empty($items)) return [];
+    foreach ($items as $it) {
+        if (!empty($it->object) && $it->object === 'page' && !empty($it->object_id)) {
+            $ids[] = (int)$it->object_id;
+        }
+    }
+    $ids = array_values(array_unique(array_filter($ids)));
+    if (empty($ids)) return [];
+    $pages = get_posts([
+        'post_type'=>'page',
+        'post__in'=>$ids,
+        'posts_per_page'=>-1,
+        'orderby'=>'post__in',
+        'post_status'=>'publish'
+    ]);
+    $out = [];
+    foreach ($pages as $p) $out[$p->ID] = $p->post_title;
+    return $out;
+}
+
+function osct_settings_all_pages_excluding($exclude_ids) {
+    $exclude_ids = array_map('intval',(array)$exclude_ids);
+    $q = new WP_Query([
+        'post_type'=>'page',
+        'post_status'=>'publish',
+        'posts_per_page'=>-1,
+        'post__not_in'=>$exclude_ids,
+        'orderby'=>'title',
+        'order'=>'ASC',
+        'fields'=>'ids'
+    ]);
+    $out = [];
+    if ($q->have_posts()) {
+        foreach ($q->posts as $pid) $out[(int)$pid] = get_the_title($pid);
+    }
+    return $out;
+}
+
+function osct_settings_blocks_all() {
+    $q = new WP_Query([
+        'post_type'=>'wp_block',
+        'post_status'=>'publish',
+        'posts_per_page'=>-1,
+        'orderby'=>'title',
+        'order'=>'ASC',
+        'fields'=>'ids'
+    ]);
+    $out = [];
+    if ($q->have_posts()) {
+        foreach ($q->posts as $pid) $out[(int)$pid] = get_the_title($pid);
+    }
+    return $out;
+}
+
+function osct_render_settings() {
+    $o = osct_settings_get();
+    $langs = osct_settings_langs();
+    $pts = osct_settings_post_types();
+    $providers = ['google'=>'Google Translate','deepl'=>'DeepL'];
+    $menus = osct_settings_menus();
+    $menu_pages = osct_settings_menu_pages($o['menu_id']);
+    $extra_pages = osct_settings_all_pages_excluding(array_keys($menu_pages));
+    $blocks = osct_settings_blocks_all();
+
+    echo '<div class="wrap">';
+    echo '<h1>OS Content Translator – Einstellungen</h1>';
+    if (isset($_GET['updated'])) echo '<div class="notice notice-success is-dismissible"><p>Einstellungen gespeichert.</p></div>';
+
+    echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'">';
+    echo '<input type="hidden" name="action" value="osct_save_settings">';
+    wp_nonce_field('osct_settings_save','osct_nonce');
+
+    echo '<h2>Provider</h2>';
+    echo '<table class="form-table"><tbody>';
+    echo '<tr><th>Standard-Provider</th><td>';
+    foreach ($providers as $k=>$label) {
+        echo '<label style="margin-right:16px"><input type="radio" name="provider_default" value="'.esc_attr($k).'" '.checked($o['provider_default'],$k,false).'> '.esc_html($label).'</label>';
+    }
+    echo '</td></tr>';
+    echo '<tr><th>API-Key Google</th><td><input type="text" name="api_google" value="'.esc_attr($o['api_google']).'" class="regular-text"></td></tr>';
+    echo '<tr><th>API-Key DeepL</th><td><input type="text" name="api_deepl" value="'.esc_attr($o['api_deepl']).'" class="regular-text"></td></tr>';
+    echo '</tbody></table>';
+
+    echo '<h2>Zielsprachen</h2>';
+    echo '<table class="form-table"><tbody><tr><th>Sprachen aus Polylang</th><td>';
+    if (!empty($langs)) {
+        foreach ($langs as $slug=>$L) {
+            $checked = in_array($slug,(array)$o['languages_active'],true) ? 'checked' : '';
+            echo '<label style="display:inline-block;margin:4px 16px 4px 0"><input type="checkbox" name="languages_active[]" value="'.esc_attr($slug).'" '.$checked.'> '.esc_html($L['name']).' ('.esc_html($slug).')</label>';
+        }
+    } else {
+        echo '<em>Keine Sprachen gefunden.</em>';
+    }
+    echo '</td></tr></tbody></table>';
+
+    echo '<h2>Provider-Override je Sprache</h2>';
+    echo '<table class="widefat striped"><thead><tr><th>Sprache</th><th>Provider</th></tr></thead><tbody>';
+    foreach ($langs as $slug=>$L) {
+        $val = isset($o['provider_override'][$slug]) ? $o['provider_override'][$slug] : '';
+        echo '<tr><td>'.esc_html($L['name']).' ('.esc_html($slug).')</td><td><select name="provider_override['.esc_attr($slug).']"><option value="">Standard</option>';
+        foreach ($providers as $k=>$label) {
+            echo '<option value="'.esc_attr($k).'" '.selected($val,$k,false).'>'.esc_html($label).'</option>';
+        }
+        echo '</select></td></tr>';
+    }
+    echo '</tbody></table>';
+
+    echo '<h2>Menü-gebundene Seitenauswahl</h2>';
+    echo '<table class="form-table"><tbody>';
+    echo '<tr><th>Menü auswählen</th><td><select name="menu_id">';
+    echo '<option value="0">– bitte wählen –</option>';
+    foreach ($menus as $mid=>$mname) {
+        echo '<option value="'.esc_attr($mid).'" '.selected((int)$o['menu_id'],(int)$mid,false).'>'.esc_html($mname).' (#'.(int)$mid.')</option>';
+    }
+    echo '</select> <button class="button" name="reload" value="1">Neu laden</button></td></tr>';
+
+    echo '<tr><th>Seiten im gewählten Menü</th><td>';
+    if ($o['menu_id'] && !empty($menu_pages)) {
+        foreach ($menu_pages as $pid=>$title) {
+            $checked = in_array((string)$pid, array_map('strval',(array)$o['page_whitelist']), true) ? 'checked' : '';
+            echo '<label style="display:block;margin:4px 0"><input type="checkbox" name="page_whitelist[]" value="'.esc_attr($pid).'" '.$checked.'> '.esc_html($title).' (#'.(int)$pid.')</label>';
+        }
+    } elseif ($o['menu_id']) {
+        echo '<em>Dieses Menü enthält keine Seiten-Links.</em>';
+    } else {
+        echo '<em>Bitte oben ein Menü wählen und neu laden.</em>';
+    }
+    echo '</td></tr>';
+    echo '</tbody></table>';
+
+    echo '<h2>Weitere veröffentlichte Seiten</h2>';
+    echo '<table class="form-table"><tbody><tr><th>Standardseiten (veröffentlicht)</th><td>';
+    if (!empty($extra_pages)) {
+        foreach ($extra_pages as $pid=>$title) {
+            $checked = in_array((string)$pid, array_map('strval',(array)$o['page_whitelist_extra']), true) ? 'checked' : '';
+            echo '<label style="display:block;margin:4px 0"><input type="checkbox" name="page_whitelist_extra[]" value="'.esc_attr($pid).'" '.$checked.'> '.esc_html($title).' (#'.(int)$pid.')</label>';
+        }
+    } else {
+        echo '<em>Keine zusätzlichen veröffentlichten Seiten gefunden.</em>';
+    }
+    echo '</td></tr></tbody></table>';
+
+    echo '<h2>Reusable Blocks</h2>';
+    echo '<table class="form-table"><tbody><tr><th>Blöcke (wp_block)</th><td>';
+    if (!empty($blocks)) {
+        foreach ($blocks as $bid=>$title) {
+            $checked = in_array((string)$bid, array_map('strval',(array)$o['block_whitelist']), true) ? 'checked' : '';
+            echo '<label style="display:block;margin:4px 0"><input type="checkbox" name="block_whitelist[]" value="'.esc_attr($bid).'" '.$checked.'> '.esc_html($title).' (#'.(int)$bid.')</label>';
+        }
+    } else {
+        echo '<em>Keine veröffentlichten Reusable Blocks gefunden.</em>';
+    }
+    echo '</td></tr></tbody></table>';
+
+    echo '<h2>Optionen</h2>';
+    echo '<table class="form-table"><tbody>';
+    echo '<tr><th>Slugs übersetzen</th><td><label><input type="checkbox" name="slug_translate" value="1" '.checked($o['slug_translate'],1,false).'> Aktiv</label></td></tr>';
+    echo '<tr><th>Review als Entwurf</th><td><label><input type="checkbox" name="review_as_draft" value="1" '.checked($o['review_as_draft'],1,false).'> Aktiv</label></td></tr>';
+    echo '<tr><th>Nur neue Inhalte automatisch</th><td><label><input type="checkbox" name="only_new" value="1" '.checked($o['only_new'],1,false).'> Aktiv</label></td></tr>';
+    echo '</tbody></table>';
+
+    submit_button('Einstellungen speichern');
+    echo '</form>';
+    echo '</div>';
+}
+
+function osct_save_settings() {
+    if (!current_user_can('manage_options')) wp_die();
+    if (empty($_POST['osct_nonce']) || !wp_verify_nonce($_POST['osct_nonce'],'osct_settings_save')) wp_die();
+
+    $provider_default = isset($_POST['provider_default']) ? sanitize_text_field($_POST['provider_default']) : 'google';
+    $api_google = isset($_POST['api_google']) ? sanitize_text_field($_POST['api_google']) : '';
+    $api_deepl = isset($_POST['api_deepl']) ? sanitize_text_field($_POST['api_deepl']) : '';
+    $languages_active = isset($_POST['languages_active']) && is_array($_POST['languages_active']) ? array_values(array_map('sanitize_text_field', $_POST['languages_active'])) : [];
+    $provider_override_in = isset($_POST['provider_override']) && is_array($_POST['provider_override']) ? $_POST['provider_override'] : [];
+    $provider_override = [];
+    foreach ($provider_override_in as $k=>$v) $provider_override[sanitize_text_field($k)] = sanitize_text_field($v);
+    $post_types = isset($_POST['post_types']) && is_array($_POST['post_types']) ? array_values(array_map('sanitize_text_field', $_POST['post_types'])) : [];
+    $slug_translate = !empty($_POST['slug_translate']) ? 1 : 0;
+    $review_as_draft = !empty($_POST['review_as_draft']) ? 1 : 0;
+    $only_new = !empty($_POST['only_new']) ? 1 : 0;
+    $menu_id = isset($_POST['menu_id']) ? (int)$_POST['menu_id'] : 0;
+    $page_whitelist = isset($_POST['page_whitelist']) && is_array($_POST['page_whitelist']) ? array_values(array_unique(array_map('absint', $_POST['page_whitelist']))) : [];
+    $page_whitelist_extra = isset($_POST['page_whitelist_extra']) && is_array($_POST['page_whitelist_extra']) ? array_values(array_unique(array_map('absint', $_POST['page_whitelist_extra']))) : [];
+    $block_whitelist = isset($_POST['block_whitelist']) && is_array($_POST['block_whitelist']) ? array_values(array_unique(array_map('absint', $_POST['block_whitelist']))) : [];
+
+    $o = [
+        'provider_default' => $provider_default,
+        'api_google' => $api_google,
+        'api_deepl' => $api_deepl,
+        'languages_active' => $languages_active,
+        'provider_override' => $provider_override,
+        'post_types' => $post_types,
+        'slug_translate' => $slug_translate,
+        'review_as_draft' => $review_as_draft,
+        'only_new' => $only_new,
+        'menu_id' => $menu_id,
+        'page_whitelist' => $page_whitelist,
+        'page_whitelist_extra' => $page_whitelist_extra,
+        'block_whitelist' => $block_whitelist
     ];
 
-    public function all(): array {
-        $o = get_option($this->key, []);
-        if (!is_array($o)) $o = [];
-        return array_merge($this->defaults, $o);
-    }
+    update_option('osct_settings', $o);
+    wp_redirect(add_query_arg(['page'=>'osct-settings','updated'=>1], admin_url('admin.php')));
+    exit;
+}
+add_action('admin_post_osct_save_settings','osct_save_settings');
 
-    public function get(string $k, $default=null) {
-        $a = $this->all();
-        return $a[$k] ?? $default;
-    }
 
-    public function updateAll(array $o): void {
-        update_option($this->key, array_merge($this->defaults, $o));
+Datei: includes\translator.php
+<?php
+if (!defined('ABSPATH')) exit;
+
+function osct_get_default_lang() {
+    $opt = get_option('polylang');
+    if (!empty($opt['default_lang'])) return $opt['default_lang'];
+    return 'en';
+}
+
+function osct_get_active_target_langs() {
+    $o = get_option('osct_settings', []);
+    $langs = isset($o['languages_active']) && is_array($o['languages_active']) ? $o['languages_active'] : [];
+    return array_values(array_unique(array_filter($langs)));
+}
+
+function osct_should_translate_slugs() {
+    $o = get_option('osct_settings', []);
+    return !empty($o['slug_translate']);
+}
+
+function osct_review_as_draft() {
+    $o = get_option('osct_settings', []);
+    return !empty($o['review_as_draft']);
+}
+
+function osct_whitelist_ids() {
+    $o = get_option('osct_settings', []);
+    $a = isset($o['page_whitelist']) && is_array($o['page_whitelist']) ? $o['page_whitelist'] : [];
+    $b = isset($o['page_whitelist_extra']) && is_array($o['page_whitelist_extra']) ? $o['page_whitelist_extra'] : [];
+    $pages = array_values(array_unique(array_map('intval', array_merge($a,$b))));
+    return $pages;
+}
+
+function osct_whitelist_blocks() {
+    $o = get_option('osct_settings', []);
+    $b = isset($o['block_whitelist']) && is_array($o['block_whitelist']) ? $o['block_whitelist'] : [];
+    return array_values(array_unique(array_map('intval',$b)));
+}
+
+function osct_copy_basic_meta($src_id, $dst_id) {
+    $meta = get_post_meta($src_id);
+    foreach ($meta as $k => $vals) {
+        if (strpos($k, '_edit_lock') === 0) continue;
+        if (strpos($k, '_edit_last') === 0) continue;
+        foreach ($vals as $v) add_post_meta($dst_id, $k, maybe_unserialize($v));
     }
 }
 
-
-Datei: src\Features\Blocks\BlockSyncService.php
-<?php
-namespace OSCT\Features\Blocks;
-if (!defined('ABSPATH')) exit;
-
-final class BlockSyncService {
-    public function register(): void {
-        add_filter('render_block_data', [$this,'mapReusableBlockToLanguage'], 10, 2);
-    }
-    public function mapReusableBlockToLanguage(array $parsed_block, $source_post_id): array {
-        if (empty($parsed_block['blockName']) || $parsed_block['blockName'] !== 'core/block') return $parsed_block;
-        if (empty($parsed_block['attrs']['ref'])) return $parsed_block;
-        if (!function_exists('pll_get_post') || !function_exists('pll_current_language')) return $parsed_block;
-        $lang = pll_current_language('slug'); if (!$lang) return $parsed_block;
-        $tr = pll_get_post((int)$parsed_block['attrs']['ref'], $lang);
-        if ($tr) $parsed_block['attrs']['ref'] = (int)$tr;
-        return $parsed_block;
-    }
+function osct_src_hash($post_id){
+    $p = get_post($post_id);
+    $title = get_the_title($post_id);
+    $content = $p ? $p->post_content : '';
+    return md5($title.'|'.$content);
 }
 
-
-Datei: src\Features\Content\LinkRelinker.php
-<?php
-
-namespace OSCT\Features\Content;
-
-if (!defined('ABSPATH')) exit;
-
-final class LinkRelinker
-{
-  public function register(): void
-  {
-    error_log('innerlr');
-    add_filter('the_content', [$this, 'run'], 9);
-  }
-  public function run(string $html): string
-  {
-    error_log('innerlr0');
-    if (is_admin()) return $html;
-    error_log('innerlr1');
-    if (!function_exists('pll_current_language') || !function_exists('pll_get_post')) return $html;
-    $lang = pll_current_language('slug');
-    if (!$lang) return $html;
-
-    $siteHost = wp_parse_url(home_url(), PHP_URL_HOST);
-    libxml_use_internal_errors(true);
-    $dom = new \DOMDocument('1.0', 'UTF-8');
-    $dom->loadHTML('<meta http-equiv="Content-Type" content="text/html; charset=utf-8">' . $html);
-    $changed = false;
-
-    foreach ($dom->getElementsByTagName('a') as $a) {
-      $href = $a->getAttribute('href');
-      if (!$href) continue;
-      $p = wp_parse_url($href);
-      if (!empty($p['scheme']) && !in_array($p['scheme'], ['http', 'https'])) continue;
-      if (!empty($p['host']) && $p['host'] !== $siteHost) continue;
-      if (!empty($p['fragment'])) continue;
-
-      $abs = $href;
-      if (empty($p['host'])) {
-        $path = isset($p['path']) ? $p['path'] : '/';
-        $abs = home_url($path);
-        if (!empty($p['query'])) $abs .= '?' . $p['query'];
-      }
-
-      $postId = url_to_postid($abs);
-      if ($postId) {
-        $tr = pll_get_post($postId, $lang);
-        if ($tr) {
-          $a->setAttribute('href', get_permalink($tr));
-          $changed = true;
-        }
-      } else {
-        $homeAbs = trailingslashit(home_url('/'));
-        $absNorm = trailingslashit(preg_replace('~\?.*$~', '', $abs));
-        if ($absNorm === $homeAbs) {
-          $a->setAttribute('href', trailingslashit(pll_home_url($lang)));
-          $changed = true;
-        }
-      }
-    }
-
-    if (!$changed) return $html;
-    $body = $dom->getElementsByTagName('body')->item(0);
-    $out = '';
-    foreach ($body->childNodes as $child) $out .= $dom->saveHTML($child);
-    return $out;
-  }
+function osct_set_target_hash($post_id,$lang,$hash){
+    update_post_meta($post_id,'_osct_tr_'.$lang.'_hash',$hash);
+    update_post_meta($post_id,'_osct_tr_'.$lang.'_updated',time());
 }
 
+function osct_get_target_hash($post_id,$lang){
+    return get_post_meta($post_id,'_osct_tr_'.$lang.'_hash',true);
+}
 
-Datei: src\Features\Menus\MenuSyncService.php
-<?php
+function osct_translation_state($src_id,$lang){
+    if (!function_exists('pll_get_post')) return 'missing';
+    $tgt = pll_get_post($src_id,$lang);
+    if (!$tgt) return 'missing';
+    $srcHash = osct_src_hash($src_id);
+    $tgtHash = osct_get_target_hash($tgt,$lang);
+    if ($tgtHash && $tgtHash === $srcHash) return 'ok';
+    return 'stale';
+}
 
-namespace OSCT\Features\Menus;
+function osct_translate_single($post_id) {
+    $post = get_post($post_id);
+    if (!$post || $post->post_status === 'trash') return new WP_Error('invalid_post','Invalid post');
+    if (!in_array($post->post_type, ['page','wp_block'], true)) return new WP_Error('invalid_type','Unsupported type');
 
-use OSCT\Domain\Repos\OptionRepo;
-use OSCT\Domain\Repos\LanguageRepo;
+    $o = get_option('osct_settings', []);
+    $in_menu = in_array((int)$post_id, isset($o['page_whitelist'])?$o['page_whitelist']:[], true) || in_array((int)$post_id, isset($o['page_whitelist_extra'])?$o['page_whitelist_extra']:[], true);
+    $in_blocks = in_array((int)$post_id, isset($o['block_whitelist'])?$o['block_whitelist']:[], true);
+    if (!($in_menu || $in_blocks)) return new WP_Error('not_whitelisted','Not whitelisted');
 
-if (!defined('ABSPATH')) exit;
+    $source_lang = osct_get_default_lang();
+    $targets = osct_get_active_target_langs();
+    if (empty($targets)) return new WP_Error('no_targets','No target languages');
 
-final class MenuSyncService
-{
-  private array $debug = [];
+    $status = osct_review_as_draft() ? 'draft' : 'publish';
+    $title_src = get_the_title($post_id);
+    $content_src = $post->post_content;
+    $slug_src = $post->post_name;
+    $srcHash = osct_src_hash($post_id);
 
-  public function __construct(private OptionRepo $opt, private LanguageRepo $langs) {}
-
-  public function bootstrap(): array
-  {
-    return $this->sync();
-  }
-
-  public function sync(): array
-  {
-    $srcMenuId = (int)$this->opt->get('menu_id', 0);
-    if (!$srcMenuId) return ['created' => 0, 'assigned' => 0, 'cloned_items' => 0, 'created_menus' => []];
-
-    $targets   = (array)$this->opt->get('languages_active', []);
-    $default   = $this->langs->default();
-    $srcMenu   = wp_get_nav_menu_object($srcMenuId);
-    if (!$srcMenu) return ['created' => 0, 'assigned' => 0, 'cloned_items' => 0, 'created_menus' => []];
-
-    $baseSlots = $this->slotsOf($srcMenuId);
-
-    $sumCreated = 0;
-    $sumAssigned = 0;
-    $sumItems = 0;
-    $createdMenus = [];
+    $map = [];
+    $map[$source_lang] = $post_id;
 
     foreach ($targets as $lang) {
-      if ($lang === $default) continue;
-
-      $targetName = 'MainMenu (' . $lang . ')';
-      $dstMenuId = 0;
-
-      if (function_exists('pll_get_term')) {
-        $maybe = pll_get_term($srcMenuId, $lang);
-        if ($maybe && !is_wp_error($maybe)) $dstMenuId = (int)$maybe;
-      }
-
-      if (!$dstMenuId) {
-        $existing = wp_get_nav_menu_object($targetName);
+        if ($lang === $source_lang) continue;
+        $existing = function_exists('pll_get_post') ? pll_get_post($post_id, $lang) : 0;
         if ($existing) {
-          $dstMenuId = (int)$existing->term_id;
-        } else {
-          $newId = wp_create_nav_menu($targetName);
-          if (is_wp_error($newId)) continue;
-          $dstMenuId = (int)$newId;
-          $sumCreated++;
-          $createdMenus[] = ['lang' => $lang, 'name' => $targetName];
-          if (function_exists('pll_set_term_language')) pll_set_term_language($dstMenuId, $lang);
-          if (function_exists('pll_get_term_translations') && function_exists('pll_save_term_translations')) {
-            $map = pll_get_term_translations($srcMenuId) ?: [];
-            $map[$default] = $srcMenuId;
-            $map[$lang] = $dstMenuId;
-            pll_save_term_translations($map);
-          }
-          $sumItems += $this->cloneItemsFlat($srcMenuId, $dstMenuId, $lang, $targetName);
-          #$sumItems += $this->cloneItemsWithParents($srcMenuId, $dstMenuId, $lang, $targetName);
+            $state = osct_translation_state($post_id,$lang);
+            if ($state === 'ok') {
+                $map[$lang] = $existing;
+                continue;
+            }
         }
-      }
 
-      if ($dstMenuId && $baseSlots) {
-        $this->assignSlots($lang, $dstMenuId, $baseSlots);
-        $sumAssigned++;
-      }
+        $t1 = function_exists('osct_api_translate') ? osct_api_translate($title_src, $lang, $source_lang) : ['ok'=>false,'text'=>''];
+        $t2 = function_exists('osct_api_translate') ? osct_api_translate($content_src, $lang, $source_lang) : ['ok'=>false,'text'=>''];
+        $title_tr = $t1['ok'] ? $t1['text'] : '';
+        $content_tr = $t2['ok'] ? $t2['text'] : '';
+
+        if ($title_tr === '' && $content_tr === '') {
+            if ($existing) $map[$lang] = $existing;
+            continue;
+        }
+
+        $new_slug = $slug_src;
+        if (osct_should_translate_slugs() && $post->post_type==='page') {
+            $slug_try = function_exists('osct_api_translate') ? osct_api_translate($title_src, $lang, $source_lang) : ['ok'=>false,'text'=>''];
+            if (!empty($slug_try['text'])) $new_slug = sanitize_title($slug_try['text']);
+        }
+
+        if ($existing) {
+            $upd = [
+                'ID' => $existing,
+                'post_title' => $title_tr !== '' ? wp_specialchars_decode($title_tr) : $title_src,
+                'post_content' => $content_tr !== '' ? $content_tr : $content_src
+            ];
+            if ($post->post_type==='page') $upd['post_name'] = $new_slug;
+            wp_update_post($upd,true);
+            osct_set_target_hash($existing,$lang,$srcHash);
+            $map[$lang] = $existing;
+            continue;
+        }
+
+        $new_id = wp_insert_post([
+            'post_type' => $post->post_type,
+            'post_status' => $status,
+            'post_title' => $title_tr !== '' ? wp_specialchars_decode($title_tr) : $title_src,
+            'post_content' => $content_tr !== '' ? $content_tr : $content_src,
+            'post_name' => $post->post_type==='page' ? $new_slug : $slug_src,
+            'post_author' => get_current_user_id(),
+            'post_parent' => $post->post_parent
+        ], true);
+
+        if (is_wp_error($new_id)) continue;
+
+        if (function_exists('pll_set_post_language')) pll_set_post_language($new_id, $lang);
+        osct_copy_basic_meta($post_id, $new_id);
+        osct_set_target_hash($new_id,$lang,$srcHash);
+        $map[$lang] = $new_id;
     }
 
-    $summary = ['created' => $sumCreated, 'assigned' => $sumAssigned, 'cloned_items' => $sumItems, 'created_menus' => $createdMenus];
-    set_transient('osct_menu_debug', ['summary' => $summary, 'rows' => $this->debug], 600);
-    return $summary;
-  }
+    if (count($map) > 1 && function_exists('pll_save_post_translations')) {
+        pll_save_post_translations($map);
+    }
 
-  private function cloneItemsFlat(int $srcMenuId, int $dstMenuId, string $lang, string $dstName): int
-  {
-    $srcItems = wp_get_nav_menu_items($srcMenuId, ['update_post_term_cache' => false]) ?: [];
-    if (!$srcItems) return 0;
+    return $map;
+}
 
-    usort($srcItems, fn($a, $b) => ($a->menu_order ?? 0) <=> ($b->menu_order ?? 0));
+function osct_translate_post($post_id) {
+    return osct_translate_single($post_id);
+}
 
+function osct_translate_run($page_ids = []) {
     $created = 0;
-
-    foreach ($srcItems as $it) {
-      $type   = get_post_meta($it->ID, '_menu_item_type', true) ?: (string)$it->type;
-      $object = get_post_meta($it->ID, '_menu_item_object', true) ?: (string)$it->object;
-      $objId  = (int)(get_post_meta($it->ID, '_menu_item_object_id', true) ?: (int)$it->object_id);
-      $url    = (string)(get_post_meta($it->ID, '_menu_item_url', true) ?: (string)$it->url);
-      $title  = (string)($it->title ?: $it->post_title ?: '');
-      if ($title === '' && $type === 'post_type' && $objId) $title = (string)(get_the_title($objId) ?: '');
-      if ($title === '' && $type === 'taxonomy' && $objId && $object) {
-        $t = get_term($objId, $object);
-        if ($t && !is_wp_error($t)) $title = (string)$t->name;
-      }
-      if ($title === '' && $type === 'custom') $title = $url ?: '#';
-
-      $args = [
-        'menu-item-status'    => 'publish',
-        'menu-item-position'  => (int)($it->menu_order ?? 0),
-        'menu-item-parent-id' => 0,
-        'menu-item-title'     => $title,
-      ];
-
-      if ($type === 'post_type') {
-        $args['menu-item-type'] = 'post_type';
-        $args['menu-item-object'] = $object ?: 'page';
-        // Übersetzte Objekt-ID holen falls vorhanden
-        if (function_exists('pll_get_post')) {
-          $translated_objId = pll_get_post($objId, $lang);
-          $args['menu-item-object-id'] = $translated_objId ?: $objId;
-        } else {
-          $args['menu-item-object-id'] = $objId;
-        }
-      } elseif ($type === 'taxonomy') {
-        $args['menu-item-type'] = 'taxonomy';
-        $args['menu-item-object'] = $object ?: 'category';
-        $args['menu-item-object-id'] = $objId;
-      } elseif ($type === 'post_type_archive') {
-        $args['menu-item-type'] = 'post_type_archive';
-        $args['menu-item-object'] = $object ?: 'post';
-      } else {
-        $args['menu-item-type'] = 'custom';
-        $args['menu-item-url']  = $url ?: '#';
-      }
-
-      $newId = wp_update_nav_menu_item($dstMenuId, 0, $args);
-      if (!is_wp_error($newId)) {
+    $skipped = 0;
+    if (empty($page_ids)) $page_ids = array_merge(osct_whitelist_ids(), osct_whitelist_blocks());
+    $page_ids = array_values(array_unique(array_map('intval',$page_ids)));
+    foreach ($page_ids as $pid) {
+        $r = osct_translate_single((int)$pid);
+        if (is_wp_error($r)) { $skipped++; continue; }
         $created++;
-      }
     }
-
-    return $created;
-  }
-
-  private function cloneItemsWithParents(int $srcMenuId, int $dstMenuId, string $lang, string $dstName): int
-  {
-    $srcItems = wp_get_nav_menu_items($srcMenuId, ['update_post_term_cache' => false]) ?: [];
-    if (!$srcItems) return 0;
-    usort($srcItems, fn($a, $b) => ($a->menu_order ?? 0) <=> ($b->menu_order ?? 0));
-
-    $map = [];
-    $created = 0;
-
-    foreach ($srcItems as $it) {
-      $type   = get_post_meta($it->ID, '_menu_item_type', true) ?: (string)$it->type;
-      $object = get_post_meta($it->ID, '_menu_item_object', true) ?: (string)$it->object;
-      $objId  = (int)(get_post_meta($it->ID, '_menu_item_object_id', true) ?: (int)$it->object_id);
-      $url    = (string)(get_post_meta($it->ID, '_menu_item_url', true) ?: (string)$it->url);
-      $title  = (string)($it->title ?: $it->post_title ?: '');
-      if ($title === '' && $type === 'post_type' && $objId) $title = (string)(get_the_title($objId) ?: '');
-      if ($title === '' && $type === 'taxonomy' && $objId && $object) {
-        $t = get_term($objId, $object);
-        if ($t && !is_wp_error($t)) $title = (string)$t->name;
-      }
-      if ($title === '' && $type === 'custom') $title = $url ?: '#';
-
-      $args = [
-        'menu-item-status'    => 'publish',
-        'menu-item-position'  => (int)($it->menu_order ?? 0),
-        'menu-item-parent-id' => 0,
-        'menu-item-title'     => $title,
-      ];
-
-      if ($type === 'post_type') {
-        $args['menu-item-type'] = 'post_type';
-        $args['menu-item-object'] = $object ?: 'page';
-        $args['menu-item-object-id'] = $objId;
-      } elseif ($type === 'taxonomy') {
-        $args['menu-item-type'] = 'taxonomy';
-        $args['menu-item-object'] = $object ?: 'category';
-        $args['menu-item-object-id'] = $objId;
-      } elseif ($type === 'post_type_archive') {
-        $args['menu-item-type'] = 'post_type_archive';
-        $args['menu-item-object'] = $object ?: 'post';
-      } else {
-        $args['menu-item-type'] = 'custom';
-        $args['menu-item-url']  = $url ?: '#';
-      }
-
-      $newId = wp_update_nav_menu_item($dstMenuId, 0, $args);
-      if (!is_wp_error($newId)) {
-        $map[(int)$it->ID] = (int)$newId;
-        $created++;
-        $meta = get_post_meta($it->ID);
-        foreach ($meta as $key => $values) {
-          if (strpos($key, '_menu_item_') === 0) {
-            update_post_meta($newId, $key, maybe_unserialize($values[0]));
-          }
-        }
-      }
-    }
-
-    foreach ($srcItems as $it) {
-      $srcId = (int)$it->ID;
-      if (empty($map[$srcId])) continue;
-      $parentSrcMeta = (int)get_post_meta($srcId, '_menu_item_menu_item_parent', true);
-      $parentSrcProp = (int)($it->menu_item_parent ?? 0);
-      $parentSrc = $parentSrcMeta ?: $parentSrcProp;
-      $parentDst = $parentSrc && !empty($map[$parentSrc]) ? (int)$map[$parentSrc] : 0;
-
-      $upd = wp_update_nav_menu_item($dstMenuId, (int)$map[$srcId], [
-        'menu-item-parent-id' => $parentDst,
-        'menu-item-position'  => (int)($it->menu_order ?? 0),
-        'menu-item-status'    => 'publish',
-      ]);
-    }
-
-    return $created;
-  }
-
-  private function slotsOf(int $menuId): array
-  {
-    $loc = get_theme_mod('nav_menu_locations', []);
-    $out = [];
-    foreach ($loc as $slot => $mid) if ((int)$mid === (int)$menuId) $out[] = $slot;
-    return $out;
-  }
-
-  private function assignSlots(string $lang, int $menuId, array $slots): void
-  {
-    $restore = null;
-    if (function_exists('pll_current_language') && function_exists('pll_switch_language')) {
-      $restore = pll_current_language('slug');
-      pll_switch_language($lang);
-    }
-    $loc = get_theme_mod('nav_menu_locations', []);
-    if (!is_array($loc)) $loc = [];
-    foreach ($slots as $slot) $loc[$slot] = $menuId;
-    set_theme_mod('nav_menu_locations', $loc);
-    if ($restore && function_exists('pll_switch_language')) pll_switch_language($restore);
-  }
+    return ['created'=>$created,'skipped'=>$skipped];
 }
 
-
-Datei: src\Translation\HashService.php
-<?php
-namespace OSCT\Translation;
-if (!defined('ABSPATH')) exit;
-
-final class HashService {
-    public function srcHash(int $post_id): string {
-        $p = get_post($post_id);
-        $title = get_the_title($post_id);
-        $content = $p ? $p->post_content : '';
-        return md5($title.'|'.$content);
+function osct_handle_test_run() {
+    if (!current_user_can('manage_options')) wp_die();
+    check_admin_referer('osct_test_run');
+    $post_id = isset($_POST['post_id']) ? absint($_POST['post_id']) : 0;
+    if (!$post_id) {
+        $wl = array_merge(osct_whitelist_ids(), osct_whitelist_blocks());
+        if (!empty($wl)) $post_id = (int) reset($wl);
     }
-    public function setTargetHash(int $post_id, string $lang, string $hash): void {
-        update_post_meta($post_id,'_osct_tr_'.$lang.'_hash',$hash);
-        update_post_meta($post_id,'_osct_tr_'.$lang.'_updated',time());
-    }
-    public function getTargetHash(int $post_id, string $lang): string {
-        return (string) get_post_meta($post_id,'_osct_tr_'.$lang.'_hash',true);
-    }
+    $res = osct_translate_single($post_id);
+    set_transient('osct_test_result', is_wp_error($res) ? $res->get_error_message() : json_encode($res), 120);
+    wp_redirect(add_query_arg(['page'=>'osct-dashboard','testrun'=>1], admin_url('admin.php')));
+    exit;
 }
+add_action('admin_post_osct_test_run','osct_handle_test_run');
 
-
-Datei: src\Translation\Jobs\Helpers.php
-<?php
-
-namespace OSCT\Translation\Jobs;
-
-if (!defined('ABSPATH')) exit;
-
-final class Helpers
-{
-  /** Hash aus Name + relevanten Feldern (stabil, DB-freundlich) */
-  public static function srcHash(string $name, array $val): string
-  {
-    $pick = [
-      'name' => $name,
-      'Bezeichnung' => $val['Bezeichnung'] ?? '',
-      'BezeichnungAusschreibung' => $val['BezeichnungAusschreibung'] ?? '',
-      'Arbeitgeberleistung' => $val['Arbeitgeberleistung'] ?? '',
-      'Aufgaben' => $val['Aufgaben'] ?? '',
-      'FachlicheAnforderungen' => $val['FachlicheAnforderungen'] ?? '',
-      'KontaktText' => $val['KontaktText'] ?? '',
-      'MetaDescription' => $val['MetaDescription'] ?? '',
-      'LinkSlug' => $val['LinkSlug'] ?? '',
-      'EinsatzortPlz' => $val['EinsatzortPlz'] ?? '',
-      'EinsatzortOrt' => $val['EinsatzortOrt'] ?? '',
-    ];
-    return sha1(wp_json_encode($pick));
-  }
-
-  /** Wörter im sichtbaren Text (HTML entfernt) */
-  public static function countWords(string $html): int
-  {
-    $text = html_entity_decode(wp_strip_all_tags($html), ENT_QUOTES, get_bloginfo('charset'));
-    $text = preg_replace('/[\pZ\pC]+/u', ' ', $text);
-    $arr  = preg_split('/\s+/u', trim($text));
-    return $text === '' ? 0 : count($arr);
-  }
-
-  /** Zeichen im sichtbaren Text */
-  public static function countChars(string $html): int
-  {
-    $text = html_entity_decode(wp_strip_all_tags($html), ENT_QUOTES, get_bloginfo('charset'));
-    return mb_strlen($text);
-  }
-
-  /** Metriken für Titel + ausgewählte Inhaltsfelder */
-  public static function countAll(string $title, array $val): array
-  {
-    $wt = self::countWords($title);
-    $ct = self::countChars($title);
-    $fields = ['Arbeitgeberleistung', 'Aufgaben', 'FachlicheAnforderungen', 'KontaktText', 'BezeichnungAusschreibung'];
-    $buf = '';
-    foreach ($fields as $f) if (!empty($val[$f]) && is_string($val[$f])) $buf .= ' ' . $val[$f];
-    $wc = self::countWords($buf);
-    $cc = self::countChars($buf);
-    return ['wt' => $wt, 'ct' => $ct, 'wc' => $wc, 'cc' => $cc];
-  }
-
-  /** Shortcodes maskieren, damit Provider kein Markup zerstören */
-  public static function protectShortcodes(string $content): array
-  {
-    if (!function_exists('get_shortcode_regex')) return [$content, []];
-    $regex = get_shortcode_regex();
-    $map = [];
-    $i = 0;
-    $masked = preg_replace_callback('/' . $regex . '/s', function ($m) use (&$map, &$i) {
-      $key = '__OSCT_SC_' . $i . '__';
-      $map[$key] = $m[0];
-      $i++;
-      return $key;
-    }, $content);
-    return [$masked, $map];
-  }
-
-  public static function restoreShortcodes(string $content, array $map): string
-  {
-    if (empty($map)) return $content;
-    return strtr($content, $map);
-  }
-
-  /** Links im HTML umschreiben (Slug + Sprachhome) */
-  public static function rewriteLinks(string $html, string $oldSlug, string $newSlug, string $lang): string
-  {
-    $out = str_replace($oldSlug, $newSlug, $html);
-    $home = trailingslashit(home_url());
-    if (function_exists('pll_home_url')) {
-      $langHome = trailingslashit(pll_home_url($lang));
-      $out = str_replace($home, $langHome, $out);
-    }
-    return $out;
-  }
-
-  /** Eine einzelne URL umschreiben */
-  public static function rewriteUrl(string $url, string $oldSlug, string $newSlug, string $lang): string
-  {
-    $u = str_replace($oldSlug, $newSlug, $url);
-    $home = trailingslashit(home_url());
-    if (function_exists('pll_home_url')) {
-      $langHome = trailingslashit(pll_home_url($lang));
-      if (str_starts_with($u, $home)) $u = $langHome . substr($u, strlen($home));
-    }
-    return $u;
-  }
-
-  /** ISO / RFC-Zeit robust nach MySQL-Datetime */
-  public static function toMysqlDate(?string $s): ?string
-  {
-    if (!$s) return null;
-    $norm = preg_replace('/\.\d+Z$/', 'Z', trim($s));
-    try {
-      $dt = new \DateTime($norm);
-    } catch (\Exception $e) {
-      return null;
-    }
-    return $dt->format('Y-m-d H:i:s');
-  }
-
-  /** „created_at“ aus Zeilen-/Wert-Feldern ermitteln */
-  public static function pickCreatedAt(array $row, array $val): string
-  {
-    $d = self::toMysqlDate(is_string($row['created_at'] ?? null) ? $row['created_at'] : null);
-    if ($d) return $d;
-
-    $d = self::toMysqlDate($val['VeroeffentlichtAb'] ?? null);
-    if ($d) return $d;
-
-    $d = self::toMysqlDate($val['DatumAb'] ?? null);
-    if ($d) return $d;
-
-    if (!empty($val['JsonLd']) && is_string($val['JsonLd'])) {
-      $j = json_decode($val['JsonLd'], true);
-      if (is_array($j) && !empty($j['datePosted'])) {
-        $d = self::toMysqlDate($j['datePosted']);
-        if ($d) return $d;
-      }
-    }
-
-    return current_time('mysql', 1);
-  }
+function osct_handle_translate() {
+    if (!current_user_can('manage_options')) wp_die();
+    if (!isset($_POST['_wpnonce']) || !wp_verify_nonce($_POST['_wpnonce'],'osct_do_translate')) wp_die();
+    @set_time_limit(180);
+    $ids = array_merge(osct_whitelist_ids(), osct_whitelist_blocks());
+    $res = osct_translate_run($ids);
+    set_transient('osct_translate_result', $res, 300);
+    wp_redirect(add_query_arg(['page'=>'osct-dashboard'], admin_url('admin.php')));
+    exit;
 }
-
-
-Datei: src\Translation\Jobs\JobLogger.php
-<?php
-
-namespace OSCT\Translation\Jobs;
-
-use OSCT\Domain\Repos\LogRepo;
-
-if (!defined('ABSPATH')) exit;
-
-final class JobsLogger
-{
-  public function __construct(
-    private LogRepo $logs,
-    private string $runId,
-    private string $sourceLang
-  ) {}
-
-  private function rid(): string
-  {
-    return $this->runId ?: wp_generate_uuid4();
-  }
-
-  public function batch(array $pickedIds, ?int $limit): void
-  {
-    $this->logs->insert([
-      'run_id'        => $this->rid(),
-      'post_id'       => 0,
-      'post_type'     => 'job',
-      'source_lang'   => $this->sourceLang,
-      'target_lang'   => '-',
-      'provider'      => 'mixed',
-      'action'        => 'batch',
-      'status'        => 'info',
-      'words_title'   => 0,
-      'chars_title'   => 0,
-      'words_content' => 0,
-      'chars_content' => 0,
-      'src_hash'      => '',
-      'message'       => sprintf(
-        'Picked %d jobs%s: %s',
-        count($pickedIds),
-        $limit !== null ? " (limit={$limit})" : '',
-        implode(',', array_slice($pickedIds, 0, 50))
-      ),
-    ]);
-  }
-
-  public function beginJob(string $jobId, string $srcHash, array $mSrc): void
-  {
-    $this->logs->insert([
-      'run_id'        => $this->rid(),
-      'post_id'       => 0,
-      'post_type'     => 'job',
-      'source_lang'   => $this->sourceLang,
-      'target_lang'   => '-',
-      'provider'      => 'mixed',
-      'action'        => 'begin',
-      'status'        => 'info',
-      'words_title'   => (int)$mSrc['wt'],
-      'chars_title'   => (int)$mSrc['ct'],
-      'words_content' => (int)$mSrc['wc'],
-      'chars_content' => (int)$mSrc['cc'],
-      'src_hash'      => $srcHash,
-      'message'       => 'job_id=' . $jobId,
-    ]);
-  }
-
-  public function result(string $jobId, string $target, string $action, string $status, array $m, string $srcHash): void
-  {
-    $this->logs->insert([
-      'run_id'        => $this->rid(),
-      'post_id'       => 0,
-      'post_type'     => 'job',
-      'source_lang'   => $this->sourceLang,
-      'target_lang'   => $target,
-      'provider'      => 'mixed',
-      'action'        => $action,
-      'status'        => $status,
-      'words_title'   => (int)$m['wt'],
-      'chars_title'   => (int)$m['ct'],
-      'words_content' => (int)$m['wc'],
-      'chars_content' => (int)$m['cc'],
-      'src_hash'      => $srcHash,
-      'message'       => ucfirst($action) . '; job_id=' . $jobId,
-    ]);
-  }
-
-  public function error(string $jobId, string $message): void
-  {
-    $this->logs->insert([
-      'run_id'        => $this->rid(),
-      'post_id'       => 0,
-      'post_type'     => 'job',
-      'source_lang'   => $this->sourceLang,
-      'target_lang'   => '-',
-      'provider'      => 'mixed',
-      'action'        => 'error',
-      'status'        => 'error',
-      'words_title'   => 0,
-      'chars_title'   => 0,
-      'words_content' => 0,
-      'chars_content' => 0,
-      'src_hash'      => '',
-      'message'       => 'job_id=' . $jobId . '; ' . $message,
-    ]);
-  }
-}
+add_action('admin_post_osct_do_translate','osct_handle_translate');
 

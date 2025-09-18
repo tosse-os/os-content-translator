@@ -1,714 +1,878 @@
-Datei: src\Translation\JobsTranslator_OLD.php
+Datei: src\Admin\Pages\SettingsPage.php
 <?php
-
-namespace OSCT\Translation;
-
+namespace OSCT\Admin\Pages;
 use OSCT\Domain\Repos\OptionRepo;
 use OSCT\Domain\Repos\LanguageRepo;
-use OSCT\Domain\Repos\JobsRepo;
+use OSCT\Domain\Repos\ContentRepo;
+
+if (!defined('ABSPATH')) exit;
+
+final class SettingsPage {
+    public function __construct(
+        private OptionRepo $opt,
+        private LanguageRepo $langs,
+        private ContentRepo $content
+    ) {}
+
+    public function render(): void {
+        $o          = $this->opt->all();
+        $languages  = $this->langs->all();
+        $menus      = $this->content->menus();
+        $menuPages  = $this->content->menuPages($o['menu_id'] ?? 0);
+        $extraPages = $this->content->allPagesExcluding(array_keys($menuPages));
+        $blocks     = $this->content->allBlocks();
+
+        echo '<div class="wrap"><h1>OS Content Translator – Einstellungen</h1>';
+        if (isset($_GET['updated'])) echo '<div class="notice notice-success is-dismissible"><p>Einstellungen gespeichert.</p></div>';
+
+        echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'">';
+        echo '<input type="hidden" name="action" value="osct_save_settings">';
+        wp_nonce_field('osct_settings_save','osct_nonce');
+
+        // Provider
+        echo '<h2>Provider</h2><table class="form-table"><tbody>';
+        $prov = $o['provider_default'] ?? 'google';
+        echo '<tr><th>Standard-Provider</th><td>';
+        foreach (['google'=>'Google Translate','deepl'=>'DeepL'] as $k=>$label) {
+            echo '<label style="margin-right:16px"><input type="radio" name="provider_default" value="'.esc_attr($k).'" '.checked($prov,$k,false).'> '.esc_html($label).'</label>';
+        }
+        echo '</td></tr>';
+        echo '<tr><th>API-Key Google</th><td><input type="text" name="api_google" class="regular-text" value="'.esc_attr($o['api_google'] ?? '').'"></td></tr>';
+        echo '<tr><th>API-Key DeepL</th><td><input type="text" name="api_deepl" class="regular-text" value="'.esc_attr($o['api_deepl'] ?? '').'"></td></tr>';
+        echo '</tbody></table>';
+
+        // Zielsprachen
+        echo '<h2>Zielsprachen</h2><table class="form-table"><tbody><tr><th>Sprachen aus Polylang</th><td>';
+        $active = (array)($o['languages_active'] ?? []);
+        foreach ($languages as $slug=>$L) {
+            $ch = in_array($slug,$active,true) ? 'checked' : '';
+            echo '<label style="display:inline-block;margin:4px 16px 4px 0"><input type="checkbox" name="languages_active[]" value="'.esc_attr($slug).'" '.$ch.'> '.esc_html($L['name']).' ('.esc_html($slug).')</label>';
+        }
+        echo '</td></tr></tbody></table>';
+
+        // Provider-Override je Sprache (NEU/Zurück)
+        echo '<h2>Provider-Override je Sprache</h2>';
+        echo '<table class="widefat striped"><thead><tr><th>Sprache</th><th>Provider</th></tr></thead><tbody>';
+        $over = (array)($o['provider_override'] ?? []);
+        foreach ($languages as $slug=>$L) {
+            $val = $over[$slug] ?? '';
+            echo '<tr><td>'.esc_html($L['name']).' ('.esc_html($slug).')</td><td>';
+            echo '<select name="provider_override['.esc_attr($slug).']">';
+            echo '<option value="">Standard</option>';
+            echo '<option value="google" '.selected($val,'google',false).'>Google Translate</option>';
+            echo '<option value="deepl" '.selected($val,'deepl',false).'>DeepL</option>';
+            echo '</select></td></tr>';
+        }
+        echo '</tbody></table>';
+
+        // Menü-gebundene Auswahl
+        echo '<h2>Menü-gebundene Seitenauswahl</h2><table class="form-table"><tbody>';
+        echo '<tr><th>Menü auswählen</th><td><select name="menu_id"><option value="0">– bitte wählen –</option>';
+        foreach ($menus as $id=>$name) echo '<option value="'.(int)$id.'" '.selected((int)($o['menu_id']??0),(int)$id,false).'>'.esc_html($name).' (#'.(int)$id.')</option>';
+        echo '</select> <button class="button" name="reload" value="1">Neu laden</button></td></tr>';
+        echo '<tr><th>Seiten im gewählten Menü</th><td>';
+        $wlMenu = (array)($o['page_whitelist'] ?? []);
+        if (!empty($menuPages)) {
+            foreach ($menuPages as $pid=>$title) {
+                $ch = in_array($pid,$wlMenu,true)?'checked':'';
+                echo '<label style="display:block;margin:4px 0"><input type="checkbox" name="page_whitelist[]" value="'.(int)$pid.'" '.$ch.'> '.esc_html($title).' (#'.(int)$pid.')</label>';
+            }
+        } else echo '<em>Bitte oben ein Menü wählen.</em>';
+        echo '</td></tr></tbody></table>';
+
+        // Weitere Seiten
+        echo '<h2>Weitere veröffentlichte Seiten</h2><table class="form-table"><tbody><tr><th>Standardseiten</th><td>';
+        $wlExtra = (array)($o['page_whitelist_extra'] ?? []);
+        if (!empty($extraPages)) {
+            foreach ($extraPages as $pid=>$title) {
+                $ch = in_array($pid,$wlExtra,true)?'checked':'';
+                echo '<label style="display:block;margin:4px 0"><input type="checkbox" name="page_whitelist_extra[]" value="'.(int)$pid.'" '.$ch.'> '.esc_html($title).' (#'.(int)$pid.')</label>';
+            }
+        } else echo '<em>Keine zusätzlichen Seiten gefunden.</em>';
+        echo '</td></tr></tbody></table>';
+
+        // Reusable Blocks
+        echo '<h2>Wiederverwendbare Blöcke</h2><table class="form-table"><tbody><tr><th>Reusable Blocks</th><td>';
+        $blWl = (array)($o['block_whitelist'] ?? []);
+        if (!empty($blocks)) {
+            foreach ($blocks as $bid=>$title) {
+                $ch = in_array($bid,$blWl,true)?'checked':'';
+                echo '<label style="display:block;margin:4px 0"><input type="checkbox" name="block_whitelist[]" value="'.(int)$bid.'" '.$ch.'> '.esc_html($title).' (#'.(int)$bid.')</label>';
+            }
+        } else echo '<em>Keine Reusable Blocks gefunden.</em>';
+        echo '</td></tr></tbody></table>';
+
+        // Optionen
+        echo '<h2>Optionen</h2><table class="form-table"><tbody>';
+        echo '<tr><th>Slugs übersetzen</th><td><label><input type="checkbox" name="slug_translate" value="1" '.checked(($o['slug_translate']??0),1,false).'> Aktiv</label></td></tr>';
+        echo '<tr><th>Review als Entwurf</th><td><label><input type="checkbox" name="review_as_draft" value="1" '.checked(($o['review_as_draft']??1),1,false).'> Aktiv</label></td></tr>';
+        echo '<tr><th>Nur neue Inhalte automatisch</th><td><label><input type="checkbox" name="only_new" value="1" '.checked(($o['only_new']??0),1,false).'> Aktiv</label></td></tr>';
+        echo '</tbody></table>';
+
+        submit_button('Einstellungen speichern');
+        echo '</form></div>';
+    }
+
+    public function save(array $in): void {
+        $o = $this->opt->all();
+
+        $o['provider_default']    = isset($in['provider_default']) ? sanitize_text_field($in['provider_default']) : 'google';
+        $o['api_google']          = sanitize_text_field($in['api_google'] ?? '');
+        $o['api_deepl']           = sanitize_text_field($in['api_deepl'] ?? '');
+        $o['languages_active']    = isset($in['languages_active']) ? array_values(array_map('sanitize_text_field',(array)$in['languages_active'])) : [];
+        $o['menu_id']             = isset($in['menu_id']) ? (int)$in['menu_id'] : 0;
+        $o['page_whitelist']      = isset($in['page_whitelist']) ? array_values(array_unique(array_map('intval',(array)$in['page_whitelist']))) : [];
+        $o['page_whitelist_extra']= isset($in['page_whitelist_extra']) ? array_values(array_unique(array_map('intval',(array)$in['page_whitelist_extra']))) : [];
+        $o['block_whitelist']     = isset($in['block_whitelist']) ? array_values(array_unique(array_map('intval',(array)$in['block_whitelist']))) : [];
+        $o['slug_translate']      = !empty($in['slug_translate']) ? 1 : 0;
+        $o['review_as_draft']     = !empty($in['review_as_draft']) ? 1 : 0;
+        $o['only_new']            = !empty($in['only_new']) ? 1 : 0;
+
+        // Provider-Override speichern
+        $overIn = isset($in['provider_override']) && is_array($in['provider_override']) ? $in['provider_override'] : [];
+        $over   = [];
+        foreach ($overIn as $lang=>$val) {
+            $lang = sanitize_text_field($lang);
+            $val  = sanitize_text_field($val);
+            if ($val==='google' || $val==='deepl') $over[$lang] = $val;
+        }
+        $o['provider_override'] = $over;
+
+        $this->opt->updateAll($o);
+        wp_redirect(add_query_arg(['page'=>'osct-settings','updated'=>1], admin_url('admin.php'))); exit;
+    }
+}
+
+
+Datei: src\Core\Autoloader.php
+<?php
+namespace OSCT\Core;
+
+if (!defined('ABSPATH')) exit;
+
+final class Autoloader
+{
+    public static function register(): void
+    {
+        spl_autoload_register([__CLASS__, 'load'], true, true);
+    }
+
+    public static function load(string $class): void
+    {
+        // nur OSCT\ Klassen laden
+        if (strncmp($class, 'OSCT\\', 5) !== 0) return;
+
+        // OSCT\Domain\Repos\OptionRepo  ->  Domain/Repos/OptionRepo.php
+        $relative = substr($class, 5);
+        $relative = str_replace('\\', DIRECTORY_SEPARATOR, $relative) . '.php';
+
+        // Plugin-Root: von /src/Core/ zwei Ebenen hoch -> /os-content-translator
+        $pluginRoot = rtrim(\dirname(__DIR__, 2), '/\\') . DIRECTORY_SEPARATOR;
+
+        // endgültiger Pfad innerhalb von /src/
+        $file = $pluginRoot . 'src' . DIRECTORY_SEPARATOR . $relative;
+
+        if (is_file($file) && is_readable($file)) {
+            require_once $file;
+        }
+    }
+}
+
+
+Datei: src\Core\Debug.php
+<?php
+namespace OSCT\Core;
+if (!defined('ABSPATH')) exit;
+
+final class Debug {
+    private const KEY = 'osct_debug_last';
+
+    public static function start(string $runId, array $context = []): void {
+        set_transient(self::KEY, [
+            'run_id'  => $runId,
+            'started' => current_time('mysql', 1),
+            'context' => $context,
+            'steps'   => [],
+            'ended'   => null,
+        ], 60 * 60);
+    }
+
+    public static function add(array $step): void {
+        $data = get_transient(self::KEY);
+        if (!is_array($data)) return;
+        $step['ts'] = current_time('mysql', 1);
+        $data['steps'][] = $step;
+        set_transient(self::KEY, $data, 60 * 60);
+    }
+
+    public static function finish(array $summary = []): void {
+        $data = get_transient(self::KEY);
+        if (!is_array($data)) return;
+        $data['ended']   = current_time('mysql', 1);
+        $data['summary'] = $summary;
+        set_transient(self::KEY, $data, 60 * 60);
+    }
+
+    public static function read(): array {
+        $data = get_transient(self::KEY);
+        return is_array($data) ? $data : [];
+    }
+}
+
+
+Datei: src\Core\Hooks.php
+<?php
+
+namespace OSCT\Core;
+
+use OSCT\Admin\Menu;
+use OSCT\Admin\Pages\DashboardPage;
+use OSCT\Admin\Pages\SettingsPage;
+use OSCT\Admin\Pages\DryRunPage;
+use OSCT\Admin\Pages\LogPage;
+use OSCT\Admin\Pages\DebugPage;
+use OSCT\Domain\Repos\OptionRepo;
+use OSCT\Domain\Repos\LanguageRepo;
+use OSCT\Domain\Repos\ContentRepo;
 use OSCT\Domain\Repos\LogRepo;
+use OSCT\Admin\Pages\JobsPage;
+use OSCT\Domain\Repos\JobsRepo;
+use OSCT\Translation\TranslationService;
+use OSCT\Translation\Providers\GoogleProvider;
+use OSCT\Translation\Providers\DeepLProvider;
+use OSCT\Features\Blocks\BlockSyncService;
+use OSCT\Features\Menus\MenuSyncService;
 
 if (!defined('ABSPATH')) exit;
 
-final class JobsTranslator
+final class Hooks
 {
-  private JobsRepo $repo;
-  /** @var callable(string $text, string $target, string $source): string */
-  private $translator;
-  private string $runId = '';
-  private bool $force = false;
-  private ?string $onlyJobId = null;
-  private ?int $limit = null;
+    private OptionRepo $options;
+    private LanguageRepo $langs;
+    private ContentRepo $content;
+    private LogRepo $logs;
+    private TranslationService $translator;
 
-  public function __construct(
-    private OptionRepo $opt,
-    private LanguageRepo $langs,
-    private LogRepo $logs
-  ) {
-    $this->repo = new JobsRepo();
-    $this->translator = fn(string $t, string $l, string $s) => $t;
-  }
-
-  private function runId(): string
-  {
-    if ($this->runId === '') $this->runId = wp_generate_uuid4();
-    return $this->runId;
-  }
-
-  public function setTranslator(callable $fn): void
-  {
-    $this->translator = $fn;
-  }
-  public function setRunId(string $id): void
-  {
-    if ($id) $this->runId = $id;
-  }
-  public function setForce(bool $on): void
-  {
-    $this->force = $on;
-  }
-  public function setOnlyJobId(?string $id): void
-  {
-    $this->onlyJobId = $id ? trim($id) : null;
-  }
-  public function setLimit(?int $n): void
-  {
-    $this->limit = $n ? max(1, (int)$n) : null;
-  }
-
-  public function translateAll(): array
-  {
-    $this->runId(); // sicherstellen, dass eine einheitliche run_id existiert
-
-    $source      = $this->langs->default();
-    $targetsAll  = (array)$this->opt->get('languages_active', []);
-    $targets     = array_values(array_filter($targetsAll, fn($l) => $l !== $source));
-
-    // Ohne Zielsprachen: sichtbar loggen und sauber aussteigen
-    if (empty($targets)) {
-      $this->logs->insert([
-        'run_id'        => $this->runId(),
-        'post_id'       => 0,
-        'post_type'     => 'job',
-        'source_lang'   => $source,
-        'target_lang'   => '-',
-        'provider'      => 'mixed',
-        'action'        => 'no_targets',
-        'status'        => 'info',
-        'words_title'   => 0,
-        'chars_title'   => 0,
-        'words_content' => 0,
-        'chars_content' => 0,
-        'src_hash'      => '',
-        'message'       => 'No target languages active (languages_active=' . implode(',', $targetsAll) . ')',
-      ]);
-      return ['created' => 0, 'skipped' => 0, 'words' => 0, 'chars' => 0];
-    }
-
-    // Quelljobs
-    $rows = $this->repo->all();
-    if ($this->onlyJobId) {
-      $rows = array_values(array_filter($rows, fn($r) => (string)$r['job_id'] === $this->onlyJobId));
-    }
-
-    // deterministisch
-    usort($rows, fn($a, $b) => strnatcmp((string)$a['job_id'], (string)$b['job_id']));
-    $limited = $this->limit !== null ? array_slice($rows, 0, $this->limit) : $rows;
-
-    // Batch-Metriken (Summe aller ausgewählten Jobs)
-    $sumWt = $sumCt = $sumWc = $sumCc = 0;
-    foreach ($limited as $r) {
-      $nameSrc = (string)$r['job_name'];
-      $val     = maybe_unserialize($r['job_value']);
-      if (!is_array($val)) $val = [];
-      $m = $this->countAll($nameSrc, $val);
-      $sumWt += $m['wt'];
-      $sumCt += $m['ct'];
-      $sumWc += $m['wc'];
-      $sumCc += $m['cc'];
-    }
-
-    // Batch-Zeile
-    $pickedIds = array_map(fn($r) => (string)$r['job_id'], $limited);
-    $this->logs->insert([
-      'run_id'        => $this->runId(),
-      'post_id'       => 0,
-      'post_type'     => 'job',
-      'source_lang'   => $source,
-      'target_lang'   => implode(',', $targets), // hier sichtbar machen
-      'provider'      => 'mixed',
-      'action'        => 'batch',
-      'status'        => 'info',
-      'words_title'   => $sumWt,
-      'chars_title'   => $sumCt,
-      'words_content' => $sumWc,
-      'chars_content' => $sumCc,
-      'src_hash'      => '',
-      'message'       => sprintf(
-        'Picked %d jobs%s: %s; targets=%s',
-        count($limited),
-        $this->limit !== null ? " (limit={$this->limit})" : '',
-        implode(',', array_slice($pickedIds, 0, 100)),
-        implode(',', $targets)
-      ),
-    ]);
-
-    $created = 0;
-    $skipped = 0;
-    $words = 0;
-    $chars = 0;
-
-    $fieldsPlain = [
-      'Bezeichnung',
-      'BezeichnungAusschreibung',
-      'MetaDescription',
-      'ArbeitgeberleistungHeader',
-      'AufgabenHeader',
-      'FachlicheAnforderungenHeader',
-      'KontaktTextHeader',
-      'StellenzielHeader',
-      'PersoenlicheAnforderungenHeader',
-      'PerspektivenHeader',
-      'UnternehmensbedeutungHeader',
-      'ArbeitgebervorstellungHeader'
-    ];
-    $fieldsHtml  = ['Arbeitgeberleistung', 'Aufgaben', 'FachlicheAnforderungen', 'KontaktText'];
-
-    foreach ($limited as $r) {
-      $jobId   = (string)$r['job_id'];
-      $nameSrc = (string)$r['job_name'];
-      $val     = maybe_unserialize($r['job_value']);
-      if (!is_array($val)) $val = [];
-      $srcHash = $this->srcHash($nameSrc, $val);
-
-      // BEGIN pro Job
-      $mSrc = $this->countAll($nameSrc, $val);
-      $this->logs->insert([
-        'run_id'        => $this->runId(),
-        'post_id'       => 0,
-        'post_type'     => 'job',
-        'source_lang'   => $source,
-        'target_lang'   => implode(',', $targets),
-        'provider'      => 'mixed',
-        'action'        => 'begin',
-        'status'        => 'info',
-        'words_title'   => $mSrc['wt'],
-        'chars_title'   => $mSrc['ct'],
-        'words_content' => $mSrc['wc'],
-        'chars_content' => $mSrc['cc'],
-        'src_hash'      => $srcHash,
-        'message'       => sprintf('[job %s] begin; title="%s"', $jobId, mb_substr($nameSrc, 0, 180)),
-      ]);
-
-      foreach ($targets as $lang) {
-        // existierende Übersetzung?
-        $existing    = $this->repo->getTranslation($jobId, $lang);
-        $stateBefore = $existing && !empty($existing['src_hash']) && $existing['src_hash'] === $srcHash ? 'ok' : 'stale';
-
-        if ($existing && $stateBefore === 'ok' && !$this->force) {
-          $mm = $this->countAll($nameSrc, $val);
-          $this->logs->insert([
-            'run_id'        => $this->runId(),
-            'post_id'       => 0,
-            'post_type'     => 'job',
-            'source_lang'   => $source,
-            'target_lang'   => $lang,
-            'provider'      => 'mixed',
-            'action'        => 'skip',
-            'status'        => 'ok',
-            'words_title'   => $mm['wt'],
-            'chars_title'   => $mm['ct'],
-            'words_content' => $mm['wc'],
-            'chars_content' => $mm['cc'],
-            'src_hash'      => $srcHash,
-            'message'       => "[job {$jobId}] OK (no changes)",
-          ]);
-          $skipped++;
-          continue;
-        }
-
-        // Übersetzen
-        $valTr  = $val;
-        $nameTr = $this->t($nameSrc, $lang, $source);
-
-        foreach ($fieldsPlain as $k) {
-          if (isset($val[$k]) && is_string($val[$k])) {
-            $tr = $this->t($val[$k], $lang, $source);
-            $valTr[$k] = $tr !== '' ? $tr : $val[$k];
-          }
-        }
-        foreach ($fieldsHtml as $k) {
-          if (isset($val[$k]) && is_string($val[$k])) {
-            [$masked, $map] = $this->protectShortcodes($val[$k]);
-            $trRaw = $this->t($masked, $lang, $source);
-            $tr    = $trRaw !== '' ? $trRaw : $val[$k];
-            $valTr[$k] = $this->restoreShortcodes($tr, $map);
-          }
-        }
-        if (isset($valTr['MetaDescription']) && is_string($valTr['MetaDescription'])) {
-          $valTr['MetaDescription'] = mb_substr($valTr['MetaDescription'], 0, 170);
-        }
-
-        // Slug
-        $oldSlug   = isset($val['LinkSlug']) && is_string($val['LinkSlug']) ? $val['LinkSlug'] : sanitize_title($nameSrc);
-        $plz       = isset($val['EinsatzortPlz']) ? (string)$val['EinsatzortPlz'] : '';
-        $ort       = isset($val['EinsatzortOrt']) ? (string)$val['EinsatzortOrt'] : '';
-        $baseTitle = $nameTr !== '' ? $nameTr : $nameSrc;
-        $newSlug   = sanitize_title($baseTitle . ($plz !== '' ? '-' . $plz : '') . ($ort !== '' ? '-' . $ort : ''));
-        $valTr['LinkSlug'] = $newSlug;
-
-        foreach (array_merge($fieldsHtml, $fieldsPlain) as $k) {
-          if (isset($valTr[$k]) && is_string($valTr[$k])) {
-            $valTr[$k] = $this->rewriteLinks($valTr[$k], $oldSlug, $newSlug, $lang);
-          }
-        }
-        if (!empty($val['JsonLd']) && is_string($val['JsonLd'])) {
-          $j = json_decode($val['JsonLd'], true);
-          if (is_array($j)) {
-            if ($baseTitle !== '') $j['title'] = $baseTitle;
-            if (isset($j['url'])) $j['url'] = $this->rewriteUrl((string)$j['url'], $oldSlug, $newSlug, $lang);
-            $valTr['JsonLd'] = wp_json_encode($j, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-          } else {
-            $valTr['JsonLd'] = $this->rewriteLinks($val['JsonLd'], $oldSlug, $newSlug, $lang);
-          }
-        }
-
-        // Speichern
-        $createdAt = $this->pickCreatedAt($r, $val);
-        $this->repo->upsert($jobId, $lang, $baseTitle, $valTr, $newSlug, $srcHash, $createdAt);
-
-        // Metriken + Log
-        $mm = $this->countAll($baseTitle, $valTr);
-        $words += $mm['wt'] + $mm['wc'];
-        $chars += $mm['ct'] + $mm['cc'];
-        $action = $existing ? 'update' : 'create';
-
-        $this->logs->insert([
-          'run_id'        => $this->runId(),
-          'post_id'       => 0,
-          'post_type'     => 'job',
-          'source_lang'   => $source,
-          'target_lang'   => $lang,
-          'provider'      => 'mixed',
-          'action'        => $action,
-          'status'        => 'ok',
-          'words_title'   => $mm['wt'],
-          'chars_title'   => $mm['ct'],
-          'words_content' => $mm['wc'],
-          'chars_content' => $mm['cc'],
-          'src_hash'      => $srcHash,
-          'message'       => "[job {$jobId}] " . ucfirst($action),
-        ]);
-
-        if (!$existing) $created++;
-      }
-
-      // optionales END pro Job (rein informativ)
-      $this->logs->insert([
-        'run_id'        => $this->runId(),
-        'post_id'       => 0,
-        'post_type'     => 'job',
-        'source_lang'   => $source,
-        'target_lang'   => implode(',', $targets),
-        'provider'      => 'mixed',
-        'action'        => 'end',
-        'status'        => 'info',
-        'words_title'   => 0,
-        'chars_title'   => 0,
-        'words_content' => 0,
-        'chars_content' => 0,
-        'src_hash'      => $srcHash,
-        'message'       => "[job {$jobId}] end",
-      ]);
-    }
-
-    return ['created' => $created, 'skipped' => $skipped, 'words' => $words, 'chars' => $chars];
-  }
-
-  private function t(string $text, string $lang, string $source): string
-  {
-    return call_user_func($this->translator, $text, $lang, $source);
-  }
-
-  private function srcHash(string $name, array $val): string
-  {
-    $pick = [
-      'name' => $name,
-      'Bezeichnung' => $val['Bezeichnung'] ?? '',
-      'BezeichnungAusschreibung' => $val['BezeichnungAusschreibung'] ?? '',
-      'Arbeitgeberleistung' => $val['Arbeitgeberleistung'] ?? '',
-      'Aufgaben' => $val['Aufgaben'] ?? '',
-      'FachlicheAnforderungen' => $val['FachlicheAnforderungen'] ?? '',
-      'KontaktText' => $val['KontaktText'] ?? '',
-      'MetaDescription' => $val['MetaDescription'] ?? '',
-      'LinkSlug' => $val['LinkSlug'] ?? '',
-      'EinsatzortPlz' => $val['EinsatzortPlz'] ?? '',
-      'EinsatzortOrt' => $val['EinsatzortOrt'] ?? '',
-    ];
-    return sha1(wp_json_encode($pick));
-  }
-
-  private function protectShortcodes(string $content): array
-  {
-    if (!function_exists('get_shortcode_regex')) return [$content, []];
-    $regex = get_shortcode_regex();
-    $map = [];
-    $i = 0;
-    $masked = preg_replace_callback('/' . $regex . '/s', function ($m) use (&$map, &$i) {
-      $key = '__OSCT_SC_' . $i . '__';
-      $map[$key] = $m[0];
-      $i++;
-      return $key;
-    }, $content);
-    return [$masked, $map];
-  }
-
-  private function restoreShortcodes(string $content, array $map): string
-  {
-    if (empty($map)) return $content;
-    return strtr($content, $map);
-  }
-
-  private function rewriteLinks(string $html, string $oldSlug, string $newSlug, string $lang): string
-  {
-    $out = str_replace($oldSlug, $newSlug, $html);
-    $home = trailingslashit(home_url());
-    if (function_exists('pll_home_url')) {
-      $langHome = trailingslashit(pll_home_url($lang));
-      $out = str_replace($home, $langHome, $out);
-    }
-    return $out;
-  }
-
-  private function rewriteUrl(string $url, string $oldSlug, string $newSlug, string $lang): string
-  {
-    $u = str_replace($oldSlug, $newSlug, $url);
-    $home = trailingslashit(home_url());
-    if (function_exists('pll_home_url')) {
-      $langHome = trailingslashit(pll_home_url($lang));
-      if (str_starts_with($u, $home)) $u = $langHome . substr($u, strlen($home));
-    }
-    return $u;
-  }
-
-  private function countWords(string $html): int
-  {
-    $text = html_entity_decode(wp_strip_all_tags($html), ENT_QUOTES, get_bloginfo('charset'));
-    $text = preg_replace('/[\pZ\pC]+/u', ' ', $text);
-    $arr = preg_split('/\s+/u', trim($text));
-    return $text === '' ? 0 : count($arr);
-  }
-
-  private function countChars(string $html): int
-  {
-    $text = html_entity_decode(wp_strip_all_tags($html), ENT_QUOTES, get_bloginfo('charset'));
-    return mb_strlen($text);
-  }
-
-  private function countAll(string $title, array $val): array
-  {
-    $wt = $this->countWords($title);
-    $ct = $this->countChars($title);
-    $fields = ['Arbeitgeberleistung', 'Aufgaben', 'FachlicheAnforderungen', 'KontaktText', 'BezeichnungAusschreibung'];
-    $buf = '';
-    foreach ($fields as $f) if (!empty($val[$f]) && is_string($val[$f])) $buf .= ' ' . $val[$f];
-    $wc = $this->countWords($buf);
-    $cc = $this->countChars($buf);
-    return ['wt' => $wt, 'ct' => $ct, 'wc' => $wc, 'cc' => $cc];
-  }
-
-  private function toMysqlDate(?string $s): ?string
-  {
-    if (!$s) return null;
-    $norm = preg_replace('/\.\d+Z$/', 'Z', trim($s));
-    try {
-      $dt = new \DateTime($norm);
-    } catch (\Exception $e) {
-      return null;
-    }
-    return $dt->format('Y-m-d H:i:s');
-  }
-
-  private function pickCreatedAt(array $row, array $val): string
-  {
-    $c = $row['created_at'] ?? null;
-    $d = $this->toMysqlDate(is_string($c) ? $c : null);
-    if ($d) return $d;
-    $d = $this->toMysqlDate($val['VeroeffentlichtAb'] ?? null);
-    if ($d) return $d;
-    $d = $this->toMysqlDate($val['DatumAb'] ?? null);
-    if ($d) return $d;
-    if (!empty($val['JsonLd']) && is_string($val['JsonLd'])) {
-      $j = json_decode($val['JsonLd'], true);
-      if (is_array($j) && !empty($j['datePosted'])) {
-        $d = $this->toMysqlDate($j['datePosted']);
-        if ($d) return $d;
-      }
-    }
-    return current_time('mysql', 1);
-  }
-}
-
-
-Datei: src\Translation\Providers\DeepLProvider.php
-<?php
-
-namespace OSCT\Translation\Providers;
-
-use OSCT\Domain\Repos\OptionRepo;
-
-if (!defined('ABSPATH')) exit;
-
-final class DeepLProvider implements ProviderInterface
-{
-    public function __construct(private OptionRepo $opt) {}
-
-    public function name(): string
+    public function __construct()
     {
-        return 'deepl';
+        $this->options     = new OptionRepo();
+        $this->langs       = new LanguageRepo();
+        $this->content     = new ContentRepo();
+        $this->logs        = new LogRepo();
+        $provider          = new GoogleProvider($this->options);
+        $this->translator  = new TranslationService($this->options, $this->langs, $this->content, $provider);
     }
 
-    public function valid(): bool
+    public function register(): void
     {
-        $key = trim((string)$this->opt->get('api_deepl', ''));
-        return $key !== '';
+        add_action('init', [$this, 'polylangRegisterWpBlock'], 20);
+        add_action('admin_menu', [$this, 'adminMenu']);
+        add_action('admin_post_osct_save_settings', [$this, 'handleSaveSettings']);
+        add_action('admin_post_osct_do_translate',  [$this, 'handleTranslate']);
+        add_action('admin_post_osct_do_dry_run',     [$this, 'handleDryRun']);
+
+        (new BlockSyncService())->register();
+
+        add_action('admin_init', function () {
+            $prov = $this->options->get('provider_default', 'google');
+            $this->translator->setProvider(
+                $prov === 'deepl' ? new DeepLProvider($this->options) : new GoogleProvider($this->options)
+            );
+        });
+
+        // Fix: nav-menus Screen braucht $GLOBALS['post']
+        add_action('current_screen', function ($screen) {
+            if (!$screen) return;
+            if ($screen->id === 'nav-menus') {
+                if (!isset($GLOBALS['post']) || !is_object($GLOBALS['post'])) {
+                    $GLOBALS['post'] = (object)['ID' => 0, 'post_status' => 'auto-draft', 'post_type' => 'page'];
+                }
+            }
+        }, 1);
+
+        add_action('load-nav-menus.php', function () {
+            if (!isset($GLOBALS['post']) || !is_object($GLOBALS['post'])) {
+                $GLOBALS['post'] = (object)['ID' => 0, 'post_status' => 'auto-draft', 'post_type' => 'page'];
+            }
+        }, 1);
+
+        // Cron Hook: run_id, force, what[]
+        add_action('osct_run_translation', [$this, 'cronTranslate'], 10, 3);
+
+        (new \OSCT\Features\Content\LinkRelinker())->register();
     }
 
-    public function translate(string $text, string $target, string $source): string
+    public function polylangRegisterWpBlock(): void
     {
-        $key = trim((string)$this->opt->get('api_deepl', ''));
-        if ($key === '' || $text === '') return '';
+        if (!function_exists('pll_get_post_types') || !function_exists('pll_set_post_types')) return;
+        $types = pll_get_post_types();
+        $types['wp_block'] = 'wp_block';
+        pll_set_post_types($types);
+    }
 
-        $endpoint = str_ends_with($key, ':fx') ? 'https://api-free.deepl.com/v2/translate'
-            : 'https://api.deepl.com/v2/translate';
+    public function adminMenu(): void
+    {
+        (new Menu(
+            new DashboardPage($this->options, $this->langs, $this->content, $this->translator, new JobsRepo()),
+            new SettingsPage($this->options, $this->langs, $this->content),
+            new DryRunPage($this->options, $this->langs, $this->content, $this->translator),
+            new LogPage($this->logs),
+            new DebugPage(),
+            new JobsPage($this->options, $this->langs, new JobsRepo()) // ← wichtig
+        ))->register();
+    }
 
-        $tgt = LangMap::deeplTarget($target);
-        $src = LangMap::deeplSource($source);
 
-        $resp = wp_remote_post($endpoint, [
-            'timeout' => 25,
-            'headers' => ['Authorization' => 'DeepL-Auth-Key ' . $key],
-            'body'    => [
-                'text'         => $text,
-                'target_lang'  => $tgt,
-                'source_lang'  => $src,
-                'tag_handling' => 'html'
-            ]
-        ]);
-        if (is_wp_error($resp)) {
-            \OSCT\Core\Debug::add(['event' => 'deepl_error', 'reason' => 'wp_error', 'msg' => $resp->get_error_message()]);
-            return '';
+    public function handleSaveSettings(): void
+    {
+        check_admin_referer('osct_settings_save', 'osct_nonce');
+        if (!current_user_can('manage_options')) wp_die();
+        (new SettingsPage($this->options, $this->langs, $this->content))->save($_POST);
+    }
+
+    public function handleTranslate(): void
+    {
+        if (!current_user_can('manage_options')) wp_die();
+        check_admin_referer('osct_do_translate');
+
+        $force = !empty($_POST['osct_force']);
+        $runId = wp_generate_uuid4();
+
+        $menuRes = (new MenuSyncService($this->options, $this->langs))->bootstrap();
+        set_transient('osct_menu_sync', $menuRes, 300);
+
+        $what = [
+            'menu_pages'  => !empty($_POST['osct_do_menu_pages']),
+            'extra_pages' => !empty($_POST['osct_do_extra_pages']),
+            'blocks'      => !empty($_POST['osct_do_blocks']),
+            'jobs'        => !empty($_POST['osct_do_jobs']),
+            'test'        => !empty($_POST['osct_test']),
+        ];
+
+        if (!empty($what['test'])) {
+            $this->cronTranslate($runId, $force, $what);
+            wp_redirect(add_query_arg(['page' => 'osct-dashboard'], admin_url('admin.php')));
+            exit;
         }
-        $code = wp_remote_retrieve_response_code($resp);
-        $bodyStr = wp_remote_retrieve_body($resp);
-        if ($code !== 200) {
-            \OSCT\Core\Debug::add(['event' => 'deepl_error', 'reason' => 'http_' . $code, 'body' => mb_substr($bodyStr, 0, 300)]);
-            return '';
-        }
-        $body = json_decode($bodyStr, true);
-        if (!isset($body['translations'][0]['text'])) {
-            \OSCT\Core\Debug::add(['event' => 'deepl_error', 'reason' => 'no_field', 'body' => mb_substr($bodyStr, 0, 200)]);
-            return '';
-        }
-        return (string)$body['translations'][0]['text'];
+
+        wp_schedule_single_event(time() + 1, 'osct_run_translation', [$runId, $force, $what]);
+
+        set_transient('osct_translate_result', [
+            'created' => 0,
+            'skipped' => 0,
+            'total'   => 0,
+            'words'   => 0,
+            'chars'   => 0,
+            'queued'  => 1
+        ], 300);
+
+        wp_redirect(add_query_arg(['page' => 'osct-dashboard'], admin_url('admin.php')));
+        exit;
+    }
+
+
+    public function cronTranslate(string $runId, bool $force, ?array $what = null): void
+    {
+        $this->translator->setRunId($runId);
+        $this->translator->setForce($force);
+
+        \OSCT\Core\Debug::start($runId, ['force' => $force, 'mode' => 'cron', 'what' => $what]);
+
+        // translateRun(?array $onlyIds = null, ?array $what = null)
+        $res = $this->translator->translateRun(
+            null,
+            $what ?: ['menu_pages' => true, 'extra_pages' => true, 'blocks' => true, 'jobs' => true]
+        );
+
+        \OSCT\Core\Debug::finish($res);
+        set_transient('osct_translate_result', $res, 300);
+    }
+
+    public function handleDryRun(): void
+    {
+        if (!current_user_can('manage_options')) wp_die();
+        check_admin_referer('osct_do_dry_run');
+        $res = $this->translator->dryRun();
+        set_transient('osct_dry_result', $res, 120);
+        wp_redirect(add_query_arg(['page' => 'osct-dry-run'], admin_url('admin.php')));
+        exit;
     }
 }
 
 
-Datei: src\Translation\Providers\GoogleProvider.php
+Datei: src\Core\Installer.php
 <?php
-
-namespace OSCT\Translation\Providers;
-
-use OSCT\Domain\Repos\OptionRepo;
-
+namespace OSCT\Core;
 if (!defined('ABSPATH')) exit;
 
-final class GoogleProvider implements ProviderInterface
-{
-    public function __construct(private OptionRepo $opt) {}
-
-    public function name(): string
-    {
-        return 'google';
+final class Installer {
+    public static function install(): void {
+        global $wpdb;
+        $table = $wpdb->prefix . 'osct_translation_log';
+        $charset = $wpdb->get_charset_collate();
+        $sql = "CREATE TABLE IF NOT EXISTS $table (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            run_id VARCHAR(36) NOT NULL,
+            post_id BIGINT UNSIGNED NOT NULL,
+            post_type VARCHAR(32) NOT NULL,
+            source_lang VARCHAR(10) NOT NULL,
+            target_lang VARCHAR(10) NOT NULL,
+            provider VARCHAR(16) NOT NULL,
+            action VARCHAR(16) NOT NULL,
+            status VARCHAR(16) NOT NULL,
+            words_title INT UNSIGNED NOT NULL DEFAULT 0,
+            chars_title INT UNSIGNED NOT NULL DEFAULT 0,
+            words_content INT UNSIGNED NOT NULL DEFAULT 0,
+            chars_content INT UNSIGNED NOT NULL DEFAULT 0,
+            src_hash CHAR(32) DEFAULT NULL,
+            message TEXT NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            KEY post_id_idx (post_id),
+            KEY target_lang_idx (target_lang),
+            KEY created_at_idx (created_at)
+        ) $charset;";
+        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        dbDelta($sql);
+        global $wpdb;
+        $table2 = $wpdb->prefix . 'jobs_i18n';
+        $charset = $wpdb->get_charset_collate();
+        $sql2 = "CREATE TABLE IF NOT EXISTS $table2 (
+            id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            job_id varchar(64) NOT NULL,
+            lang varchar(10) NOT NULL,
+            job_name text NOT NULL,
+            job_value longtext NOT NULL,
+            link_slug varchar(200) NOT NULL,
+            src_hash char(40) NOT NULL,
+            created_at datetime NOT NULL,
+            updated_at datetime NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY job_lang (job_id,lang)
+            ) $charset;";
+        dbDelta($sql2);
     }
+}
 
-    public function valid(): bool
-    {
-        $key = trim((string)$this->opt->get('api_google', ''));
-        return $key !== '';
-    }
 
-    public function translate(string $text, string $target, string $source): string
-    {
-        $key = trim((string)$this->opt->get('api_google', ''));
-        if ($key === '' || $text === '') return '';
+Datei: src\Domain\Repos\ContentRepo.php
+<?php
+namespace OSCT\Domain\Repos;
+if (!defined('ABSPATH')) exit;
 
-        $tgt = LangMap::googleTarget($target);
-        $src = LangMap::googleSource($source);
-
-        $chunks = $this->chunk($text, 4500);
-        $out = [];
-
-        foreach ($chunks as $chunk) {
-            $url = add_query_arg([
-                'key' => $key
-            ], 'https://translation.googleapis.com/language/translate/v2');
-
-            $resp = wp_remote_post($url, [
-                'timeout' => 25,
-                'headers' => ['Accept' => 'application/json'],
-                'body'    => [
-                    'q'      => $chunk,
-                    'target' => $tgt,
-                    'source' => $src,
-                    'format' => 'html'
-                ]
-            ]);
-
-            if (is_wp_error($resp)) {
-                \OSCT\Core\Debug::add(['event' => 'google_error', 'reason' => 'wp_error', 'msg' => $resp->get_error_message()]);
-                return '';
-            }
-            $code = wp_remote_retrieve_response_code($resp);
-            $bodyStr = wp_remote_retrieve_body($resp);
-            if ($code !== 200) {
-                \OSCT\Core\Debug::add(['event' => 'google_error', 'reason' => 'http_' . $code, 'body' => mb_substr($bodyStr, 0, 300)]);
-                return '';
-            }
-
-            $body = json_decode($bodyStr, true);
-            if (!isset($body['data']['translations'][0]['translatedText'])) {
-                \OSCT\Core\Debug::add(['event' => 'google_error', 'reason' => 'no_field', 'body' => mb_substr($bodyStr, 0, 200)]);
-                return '';
-            }
-            $out[] = (string)$body['data']['translations'][0]['translatedText'];
-        }
-
-        return implode('', $out);
-    }
-
-    private function chunk(string $html, int $limit): array
-    {
-        if (mb_strlen($html) <= $limit) return [$html];
-        $parts = [];
-        $buffer = '';
-        $segments = preg_split('/(<\/p>)/iu', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
-        foreach ($segments as $seg) {
-            $candidate = $buffer . $seg;
-            if (mb_strlen($candidate) > $limit && $buffer !== '') {
-                $parts[] = $buffer;
-                $buffer = $seg;
-            } else {
-                $buffer = $candidate;
-            }
-        }
-        if ($buffer !== '') $parts[] = $buffer;
-
-        $final = [];
-        foreach ($parts as $p) {
-            if (mb_strlen($p) <= $limit) {
-                $final[] = $p;
-                continue;
-            }
-            $final = array_merge($final, $this->chunkByWords($p, $limit));
-        }
-        return $final;
-    }
-
-    private function chunkByWords(string $text, int $limit): array
-    {
-        $out = [];
-        $buf = '';
-        $tokens = preg_split('/(\s+)/u', $text, -1, PREG_SPLIT_DELIM_CAPTURE);
-        foreach ($tokens as $tok) {
-            $candidate = $buf . $tok;
-            if (mb_strlen($candidate) > $limit && $buf !== '') {
-                $out[] = $buf;
-                $buf = $tok;
-            } else {
-                $buf = $candidate;
-            }
-        }
-        if ($buf !== '') $out[] = $buf;
+final class ContentRepo {
+    public function menus(): array {
+        $menus = wp_get_nav_menus(); $out=[];
+        foreach ($menus as $m) $out[(int)$m->term_id]=$m->name;
         return $out;
     }
+    public function menuName(int $id): string {
+        $obj = wp_get_nav_menu_object($id);
+        return $obj ? $obj->name : '';
+    }
+    public function menuPages(int $menu_id): array {
+        if ($menu_id<=0) return [];
+        $items = wp_get_nav_menu_items($menu_id, ['update_post_term_cache'=>false]) ?: [];
+        $ids=[]; foreach ($items as $it) if ($it->object==='page' && !empty($it->object_id)) $ids[]=(int)$it->object_id;
+        if (!$ids) return [];
+        $pages = get_posts(['post_type'=>'page','post__in'=>array_values(array_unique($ids)),'posts_per_page'=>-1,'orderby'=>'post__in','post_status'=>'publish']);
+        $out=[]; foreach ($pages as $p) $out[$p->ID]= $p->post_title;
+        return $out;
+    }
+    public function allPagesExcluding(array $exclude): array {
+        $q = new \WP_Query(['post_type'=>'page','post_status'=>'publish','posts_per_page'=>-1,'post__not_in'=>array_map('intval',$exclude),'orderby'=>'title','order'=>'ASC','fields'=>'ids']);
+        $out=[]; foreach ($q->posts as $id) $out[(int)$id]=get_the_title($id);
+        return $out;
+    }
+    public function allBlocks(): array {
+        $q = new \WP_Query(['post_type'=>'wp_block','post_status'=>'publish','posts_per_page'=>-1,'orderby'=>'title','order'=>'ASC','fields'=>'ids']);
+        $out=[]; foreach ($q->posts as $id) $out[(int)$id]=get_the_title($id);
+        return $out;
+    }
+    /** @return \WP_Post[] */
+    public function getPostsByIds(array $ids, string $type): array {
+        return get_posts(['post_type'=>$type,'post__in'=>array_map('intval',$ids),'posts_per_page'=>-1,'orderby'=>'post__in']);
+    }
 }
 
 
-Datei: src\Translation\Providers\LangMap.php
+Datei: src\Domain\Repos\JobsRepo.php
 <?php
 
-namespace OSCT\Translation\Providers;
+namespace OSCT\Domain\Repos;
 
 if (!defined('ABSPATH')) exit;
 
-final class LangMap
+final class JobsRepo
 {
-  public static function googleTarget(string $slug): string
+  private string $srcTable;
+  private string $i18nTable;
+
+  public function __construct()
   {
-    $slug = strtolower(trim($slug));
-    $map = [
-      'en' => 'en',
-      'de' => 'de',
-      'pl' => 'pl',
-      'hu' => 'hu',
-      'hr' => 'hr',
-      'ro' => 'ro',
-      'bg' => 'bg',
-      'ru' => 'ru',
-      'en-gb' => 'en',
-      'en-us' => 'en',
-      'pt-br' => 'pt',
-      'pt-pt' => 'pt'
-    ];
-    return $map[$slug] ?? preg_replace('/[^a-z]/', '', $slug);
+    global $wpdb;
+    $this->srcTable  = $wpdb->prefix . 'jobs';
+    $this->i18nTable = $wpdb->prefix . 'jobs_i18n';
   }
 
-  public static function googleSource(string $slug): string
+  public function all(): array
   {
-    return self::googleTarget($slug);
+    global $wpdb;
+    return $wpdb->get_results("SELECT * FROM {$this->srcTable}", ARRAY_A);
   }
 
-  public static function deeplTarget(string $slug): string
+  public function getTranslation(string $jobId, string $lang): ?array
   {
-    $slug = strtolower(trim($slug));
-    $map = [
-      'de' => 'DE',
-      'en' => 'EN-GB',
-      'en-gb' => 'EN-GB',
-      'en-us' => 'EN-US',
-      'pl' => 'PL',
-      'hu' => 'HU',
-      'hr' => 'HR',
-      'ro' => 'RO',
-      'bg' => 'BG',
-      'ru' => 'RU',
-      'fr' => 'FR',
-      'it' => 'IT',
-      'es' => 'ES',
-      'nl' => 'NL',
-      'pt' => 'PT-PT',
-      'pt-pt' => 'PT-PT',
-      'pt-br' => 'PT-BR'
-    ];
-    return $map[$slug] ?? strtoupper($slug);
+    global $wpdb;
+    $row = $wpdb->get_row(
+      $wpdb->prepare(
+        "SELECT * FROM {$this->i18nTable} WHERE job_id=%s AND lang=%s",
+        $jobId,
+        $lang
+      ),
+      ARRAY_A
+    );
+    return $row ?: null;
   }
 
-  public static function deeplSource(string $slug): string
+  public function allTranslationsForJob(string $jobId): array
   {
-    $slug = strtolower(trim($slug));
-    $map = [
-      'de' => 'DE',
-      'en' => 'EN',
-      'pl' => 'PL',
-      'hu' => 'HU',
-      'hr' => 'HR',
-      'ro' => 'RO',
-      'bg' => 'BG',
-      'ru' => 'RU',
-      'fr' => 'FR',
-      'it' => 'IT',
-      'es' => 'ES',
-      'nl' => 'NL',
-      'pt' => 'PT'
+    global $wpdb;
+    $rows = $wpdb->get_results(
+      $wpdb->prepare(
+        "SELECT lang, updated_at FROM {$this->i18nTable} WHERE job_id=%s",
+        $jobId
+      ),
+      ARRAY_A
+    );
+    return $rows ?: [];
+  }
+
+  public function upsert(
+    string $jobId,
+    string $lang,
+    string $jobName,
+    array $jobValue,
+    string $slug,
+    string $srcHash,
+    ?string $createdAt = null
+  ): int {
+    global $wpdb;
+    $data = [
+      'job_id'     => $jobId,
+      'lang'       => $lang,
+      'job_name'   => $jobName,
+      'job_value'  => maybe_serialize($jobValue),
+      'link_slug'  => $slug,
+      'src_hash'   => $srcHash,
+      'updated_at' => current_time('mysql', 1),
     ];
-    return $map[$slug] ?? strtoupper($slug);
+    $exist = $this->getTranslation($jobId, $lang);
+    if ($exist) {
+      $wpdb->update($this->i18nTable, $data, ['id' => $exist['id']]);
+      return (int)$exist['id'];
+    }
+    $data['created_at'] = $createdAt ?: current_time('mysql', 1);
+    $wpdb->insert($this->i18nTable, $data);
+    return (int)$wpdb->insert_id;
+  }
+
+  /**
+   * Anzahl aller Jobs in der Quelltabelle.
+   */
+  public function countAll(): int
+  {
+    global $wpdb;
+    return (int)$wpdb->get_var("SELECT COUNT(*) FROM {$this->srcTable}");
+  }
+
+  /**
+   * Anzahl der Job-IDs, die in mindestens EINER der angegebenen Sprachen eine Übersetzung haben.
+   * @param string[] $langs Zielsprachen (Slugs wie 'en', 'pl', ...)
+   */
+  public function countAnyTranslated(array $langs): int
+  {
+    global $wpdb;
+    $langs = array_values(array_filter(array_map('strval', $langs)));
+    if (empty($langs)) return 0;
+
+    // dynamische IN-Klausel bauen
+    $placeholders = implode(',', array_fill(0, count($langs), '%s'));
+    $sql = "
+      SELECT COUNT(DISTINCT job_id)
+      FROM {$this->i18nTable}
+      WHERE lang IN ($placeholders)
+    ";
+    return (int)$wpdb->get_var($wpdb->prepare($sql, $langs));
+  }
+
+  /**
+   * Anzahl der übersetzten Jobs für eine konkrete Zielsprache.
+   */
+  public function countTranslated(string $lang): int
+  {
+    global $wpdb;
+    return (int)$wpdb->get_var(
+      $wpdb->prepare(
+        "SELECT COUNT(DISTINCT job_id) FROM {$this->i18nTable} WHERE lang=%s",
+        $lang
+      )
+    );
   }
 }
 
 
-Datei: src\Translation\Providers\ProviderInterface.php
+Datei: src\Domain\Repos\LanguageRepo.php
 <?php
-
-namespace OSCT\Translation\Providers;
-
+namespace OSCT\Domain\Repos;
 if (!defined('ABSPATH')) exit;
 
-interface ProviderInterface
-{
-    public function name(): string;
-    public function valid(): bool;
-    public function translate(string $text, string $target, string $source): string;
+final class LanguageRepo {
+    public function all(): array {
+        $out = [];
+
+        // 1) Polylang-Objekt direkt (am zuverlässigsten)
+        if (function_exists('PLL')) {
+            $pll = PLL();
+            if (isset($pll->model) && method_exists($pll->model, 'get_languages_list')) {
+                $list = $pll->model->get_languages_list(['hide_empty' => 0]);
+                if (is_array($list)) {
+                    foreach ($list as $o) {
+                        if (!empty($o->slug)) {
+                            $out[$o->slug] = [
+                                'slug'   => $o->slug,
+                                'name'   => $o->name ?? strtoupper($o->slug),
+                                'locale' => $o->locale ?? $o->slug,
+                            ];
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2) Klassische API
+        if (empty($out) && function_exists('pll_languages_list')) {
+            $objs = pll_languages_list(['fields' => 'objects', 'hide_empty' => 0]);
+            if (is_array($objs)) {
+                foreach ($objs as $o) {
+                    if (!empty($o->slug)) {
+                        $out[$o->slug] = [
+                            'slug'   => $o->slug,
+                            'name'   => $o->name ?? strtoupper($o->slug),
+                            'locale' => $o->locale ?? $o->slug,
+                        ];
+                    }
+                }
+            }
+        }
+
+        // 3) Über die Sprache-Taxonomie + pll_get_language()
+        if (empty($out)) {
+            $tax = function_exists('pll_get_language_taxonomy') ? pll_get_language_taxonomy() : 'language';
+            $terms = function_exists('get_terms') ? get_terms([
+                'taxonomy'   => $tax,
+                'hide_empty' => false,
+            ]) : [];
+            if (is_array($terms)) {
+                foreach ($terms as $t) {
+                    if (empty($t->slug)) continue;
+                    $obj = function_exists('pll_get_language') ? pll_get_language($t->slug) : null;
+                    $out[$t->slug] = [
+                        'slug'   => $t->slug,
+                        'name'   => $obj->name   ?? $t->name   ?? strtoupper($t->slug),
+                        'locale' => $obj->locale ?? $t->slug,
+                    ];
+                }
+            }
+        }
+
+        // 4) Fallback auf gespeicherte Optionen
+        if (empty($out)) {
+            $opt = get_option('polylang');
+            if (is_array($opt) && !empty($opt['languages'])) {
+                foreach ($opt['languages'] as $slug => $row) {
+                    $out[$slug] = [
+                        'slug'   => $slug,
+                        'name'   => $row['name']   ?? strtoupper($slug),
+                        'locale' => $row['locale'] ?? $slug,
+                    ];
+                }
+            } elseif (!empty($opt['default_lang'])) {
+                $slug = $opt['default_lang'];
+                $out[$slug] = ['slug'=>$slug,'name'=>strtoupper($slug),'locale'=>$slug];
+            }
+        }
+
+        ksort($out);
+        return $out;
+    }
+
+    public function default(): string {
+        $opt = get_option('polylang');
+        return !empty($opt['default_lang']) ? $opt['default_lang'] : 'en';
+    }
+}
+
+
+Datei: src\Domain\Repos\LogRepo.php
+<?php
+namespace OSCT\Domain\Repos;
+if (!defined('ABSPATH')) exit;
+
+final class LogRepo {
+    private function table(): string {
+        global $wpdb; return $wpdb->prefix . 'osct_translation_log';
+    }
+
+    public function insert(array $row): void {
+        global $wpdb;
+        $wpdb->insert($this->table(), [
+            'run_id'         => $row['run_id'],
+            'post_id'        => (int)$row['post_id'],
+            'post_type'      => $row['post_type'],
+            'source_lang'    => $row['source_lang'],
+            'target_lang'    => $row['target_lang'],
+            'provider'       => $row['provider'],
+            'action'         => $row['action'],
+            'status'         => $row['status'],
+            'words_title'    => (int)$row['words_title'],
+            'chars_title'    => (int)$row['chars_title'],
+            'words_content'  => (int)$row['words_content'],
+            'chars_content'  => (int)$row['chars_content'],
+            'src_hash'       => $row['src_hash'],
+            'message'        => $row['message'],
+            'created_at'     => current_time('mysql', 1),
+        ]);
+    }
+
+    public function list(array $args=[]): array {
+        global $wpdb;
+        $table = $this->table();
+        $where = '1=1';
+        $params = [];
+        if (!empty($args['search'])) {
+            $where .= ' AND (post_id = %d OR target_lang = %s)';
+            $params[] = (int)$args['search'];
+            $params[] = $args['search'];
+        }
+        if (!empty($args['from'])) {
+            $where .= ' AND created_at >= %s';
+            $params[] = $args['from'];
+        }
+        if (!empty($args['to'])) {
+            $where .= ' AND created_at <= %s';
+            $params[] = $args['to'];
+        }
+        $paged = max(1, (int)($args['paged'] ?? 1));
+        $pp    = max(1, (int)($args['per_page'] ?? 50));
+        $off   = ($paged-1)*$pp;
+
+        $sql = "SELECT SQL_CALC_FOUND_ROWS * FROM $table WHERE $where ORDER BY id DESC LIMIT %d OFFSET %d";
+        $params[] = $pp;
+        $params[] = $off;
+
+        $rows = $wpdb->get_results($wpdb->prepare($sql, $params), ARRAY_A);
+        $total = (int)$wpdb->get_var('SELECT FOUND_ROWS()');
+
+        return ['rows'=>$rows,'total'=>$total,'paged'=>$paged,'per_page'=>$pp];
+    }
+
+    public function sums(array $args=[]): array {
+        global $wpdb;
+        $table = $this->table();
+        $where = '1=1';
+        $params = [];
+        if (!empty($args['from'])) { $where.=' AND created_at >= %s'; $params[]=$args['from']; }
+        if (!empty($args['to']))   { $where.=' AND created_at <= %s'; $params[]=$args['to']; }
+        $sql = "SELECT
+            COUNT(*) as entries,
+            SUM(words_title+words_content) as words,
+            SUM(chars_title+chars_content) as chars
+            FROM $table WHERE $where";
+        $row = $wpdb->get_row($wpdb->prepare($sql,$params), ARRAY_A);
+        return [
+            'entries'=>(int)($row['entries'] ?? 0),
+            'words'  =>(int)($row['words'] ?? 0),
+            'chars'  =>(int)($row['chars'] ?? 0),
+        ];
+    }
+
+    public function exportCsv(array $args=[]): string {
+        $data = $this->list(array_merge($args,['per_page'=>100000,'paged'=>1]));
+        $rows = $data['rows'];
+        $fh = fopen('php://temp', 'w+');
+        fputcsv($fh, ['id','run_id','post_id','post_type','source_lang','target_lang','provider','action','status','words_title','chars_title','words_content','chars_content','src_hash','message','created_at']);
+        foreach ($rows as $r) fputcsv($fh, $r);
+        rewind($fh);
+        return stream_get_contents($fh);
+    }
+
+    public function lastRunId(): ?string
+    {
+        global $wpdb;
+        $table = $this->table();
+        $run = $wpdb->get_var("SELECT run_id FROM $table ORDER BY id DESC LIMIT 1");
+        return $run ?: null;
+    }
+
+    public function lastRunJobSummary(): array
+    {
+        global $wpdb;
+        $table = $this->table();
+        $runId = $this->lastRunId();
+        if (!$runId) return ['entries' => 0, 'words' => 0, 'chars' => 0];
+        $sql = "SELECT
+        COUNT(*) as entries,
+        SUM(words_title+words_content) as words,
+        SUM(chars_title+chars_content) as chars
+        FROM $table
+        WHERE run_id = %s AND post_type = 'job' AND action IN ('create','update')";
+        $row = $wpdb->get_row($wpdb->prepare($sql, $runId), ARRAY_A);
+        return [
+            'entries' => (int)($row['entries'] ?? 0),
+            'words'  => (int)($row['words'] ?? 0),
+            'chars'  => (int)($row['chars'] ?? 0),
+        ];
+    }
+}
+
+
+Datei: src\Domain\Repos\OptionRepo.php
+<?php
+namespace OSCT\Domain\Repos;
+if (!defined('ABSPATH')) exit;
+
+final class OptionRepo {
+    private string $key = 'osct_settings';
+
+    private array $defaults = [
+        'provider_default'    => 'google',
+        'provider_override'   => [],       // NEU: Map [lang => google|deepl]
+        'api_google'          => '',
+        'api_deepl'           => '',
+        'languages_active'    => [],
+        'menu_id'             => 0,
+        'page_whitelist'      => [],
+        'page_whitelist_extra'=> [],
+        'block_whitelist'     => [],
+        'slug_translate'      => 0,
+        'review_as_draft'     => 1,
+        'only_new'            => 0,        // optional (zukunft)
+    ];
+
+    public function all(): array {
+        $o = get_option($this->key, []);
+        if (!is_array($o)) $o = [];
+        return array_merge($this->defaults, $o);
+    }
+
+    public function get(string $k, $default=null) {
+        $a = $this->all();
+        return $a[$k] ?? $default;
+    }
+
+    public function updateAll(array $o): void {
+        update_option($this->key, array_merge($this->defaults, $o));
+    }
 }
 

@@ -1,798 +1,800 @@
-Datei: os-content-translator.php
-<?php
-/*
-Plugin Name: OS Content Translator
-Description: Automatisiertes Übersetzungsmodul mit Polylang-Integration (modular).
-Version: 2.0.0
-Author: ORANGE SERVICES
-*/
-if (!defined('ABSPATH')) exit;
+Datei: .git\COMMIT_EDITMSG
+Initialer Stand des Plugins
 
-define('OSCT_DIR', plugin_dir_path(__FILE__));
-define('OSCT_URL', plugin_dir_url(__FILE__));
-define('OSCT_NS', 'OSCT');
 
-//define('OSCT_TEST_JOB_ID', '7e526cb0-b8c6-4c4d-9e4b-98e2428757c8');
+Datei: .git\config
+[core]
+	repositoryformatversion = 0
+	filemode = false
+	bare = false
+	logallrefupdates = true
+	symlinks = false
+	ignorecase = true
 
-require_once OSCT_DIR . 'src/Core/Autoloader.php';
-OSCT\Core\Autoloader::register();
 
-register_activation_hook(__FILE__, function () {
-    OSCT\Core\Installer::install();
-});
+Datei: .git\description
+Unnamed repository; edit this file 'description' to name the repository.
 
-add_action('plugins_loaded', function () {
-    (new OSCT\Core\Hooks())->register();
-}, 20);
 
-//HM Jobs Importer
-add_action('init', function () {
-    if (!function_exists('pll_register_string')) return;
+Datei: .git\HEAD
+ref: refs/heads/main
 
-    $GLOBALS['os_pll_defaults'] = [
-        'Suchen nach' => [
-            'en' => 'Search for',
-            'ro' => 'Căutare după',
-            'pl' => 'Szukaj',
-            'hu' => 'Keresés',
-            'bg' => 'Търсене на',
-            'de' => 'Suchen nach',
-            'hr' => 'Pretraži',
-        ],
-        'Jobtitel oder Ort...' => [
-            'en' => 'Job title or location...',
-            'ro' => 'Titlu job sau locație...',
-            'pl' => 'Stanowisko lub lokalizacja...',
-            'hu' => 'Állás megnevezése vagy hely...',
-            'bg' => 'Длъжност или място...',
-            'de' => 'Jobtitel oder Ort...',
-            'hr' => 'Naziv posla ili mjesto...',
-        ],
-        'von' => [
-            'en' => 'of',
-            'ro' => 'din',
-            'pl' => 'z',
-            'hu' => 'ből',
-            'bg' => 'от',
-            'de' => 'von',
-            'hr' => 'od',
-        ],
-        'Stellenangeboten' => [
-            'en' => 'job offers',
-            'ro' => 'oferte de muncă',
-            'pl' => 'oferty pracy',
-            'hu' => 'állásajánlatok',
-            'bg' => 'обяви за работа',
-            'de' => 'Stellenangeboten',
-            'hr' => 'ponude poslova',
-        ],
-    ];
 
-    foreach (array_keys($GLOBALS['os_pll_defaults']) as $original) {
-        pll_register_string(sanitize_title($original), $original, 'Theme-Texte');
-    }
-});
+Datei: .git\hooks\applypatch-msg.sample
+#!/bin/sh
+#
+# An example hook script to check the commit log message taken by
+# applypatch from an e-mail message.
+#
+# The hook should exit with non-zero status after issuing an
+# appropriate message if it wants to stop the commit.  The hook is
+# allowed to edit the commit message file.
+#
+# To enable this hook, rename this file to "applypatch-msg".
 
-function os_pll($text)
-{
-    $translated = function_exists('pll__') ? pll__($text) : $text;
-    if ($translated !== $text) return $translated;
-    $lang = function_exists('pll_current_language') ? pll_current_language() : 'de';
-    if (isset($GLOBALS['os_pll_defaults'][$text][$lang])) return $GLOBALS['os_pll_defaults'][$text][$lang];
-    return $text;
-}
+. git-sh-setup
+commitmsg="$(git rev-parse --git-path hooks/commit-msg)"
+test -x "$commitmsg" && exec "$commitmsg" ${1+"$@"}
+:
 
-function eos_pll($text)
-{
-    echo os_pll($text);
+
+Datei: .git\hooks\commit-msg.sample
+#!/bin/sh
+#
+# An example hook script to check the commit log message.
+# Called by "git commit" with one argument, the name of the file
+# that has the commit message.  The hook should exit with non-zero
+# status after issuing an appropriate message if it wants to stop the
+# commit.  The hook is allowed to edit the commit message file.
+#
+# To enable this hook, rename this file to "commit-msg".
+
+# Uncomment the below to add a Signed-off-by line to the message.
+# Doing this in a hook is a bad idea in general, but the prepare-commit-msg
+# hook is more suited to it.
+#
+# SOB=$(git var GIT_AUTHOR_IDENT | sed -n 's/^\(.*>\).*$/Signed-off-by: \1/p')
+# grep -qs "^$SOB" "$1" || echo "$SOB" >> "$1"
+
+# This example catches duplicate Signed-off-by lines.
+
+test "" = "$(grep '^Signed-off-by: ' "$1" |
+	 sort | uniq -c | sed -e '/^[ 	]*1[ 	]/d')" || {
+	echo >&2 Duplicate Signed-off-by lines.
+	exit 1
 }
 
 
-Datei: src\Admin\Menu.php
-<?php
-namespace OSCT\Admin;
-use OSCT\Admin\Pages\DashboardPage;
-use OSCT\Admin\Pages\SettingsPage;
-use OSCT\Admin\Pages\DryRunPage;
-use OSCT\Admin\Pages\LogPage;
-use OSCT\Admin\Pages\DebugPage;
-use OSCT\Admin\Pages\JobsPage;
+Datei: .git\hooks\fsmonitor-watchman.sample
+#!/usr/bin/perl
 
-if (!defined('ABSPATH')) exit;
+use strict;
+use warnings;
+use IPC::Open2;
 
-final class Menu
-{
-    public function __construct(
-        private DashboardPage $dashboard,
-        private SettingsPage $settings,
-        private DryRunPage $dry,
-        private LogPage $logs,
-        private DebugPage $debug,
-        private JobsPage $jobs // ← neu
-    ) {}
+# An example hook script to integrate Watchman
+# (https://facebook.github.io/watchman/) with git to speed up detecting
+# new and modified files.
+#
+# The hook is passed a version (currently 2) and last update token
+# formatted as a string and outputs to stdout a new update token and
+# all files that have been modified since the update token. Paths must
+# be relative to the root of the working tree and separated by a single NUL.
+#
+# To enable this hook, rename this file to "query-watchman" and set
+# 'git config core.fsmonitor .git/hooks/query-watchman'
+#
+my ($version, $last_update_token) = @ARGV;
 
-    public function register(): void
-    {
-        add_menu_page('Übersetzungsmodul', 'Übersetzungsmodul', 'manage_options', 'osct-dashboard', [$this->dashboard, 'render'], 'dashicons-translation', 58);
-        add_submenu_page('osct-dashboard', 'Dashboard', 'Dashboard', 'manage_options', 'osct-dashboard', [$this->dashboard, 'render']);
-        add_submenu_page('osct-dashboard', 'Einstellungen', 'Einstellungen', 'manage_options', 'osct-settings', [$this->settings, 'render']);
-        add_submenu_page('osct-dashboard', 'Trockenlauf', 'Trockenlauf', 'manage_options', 'osct-dry-run', [$this->dry, 'render']);
-        add_submenu_page('osct-dashboard', 'Logs', 'Logs', 'manage_options', 'osct-logs', [$this->logs, 'render']);
-        add_submenu_page('osct-dashboard', 'Letzter Lauf (Debug)', 'Letzter Lauf (Debug)', 'manage_options', 'osct-debug', [$this->debug, 'render']);
-        add_submenu_page('osct-dashboard', 'Jobs-Übersicht', 'Jobs-Übersicht', 'manage_options', 'osct-jobs', [$this->jobs, 'render']); // ← neu
-    }
+# Uncomment for debugging
+# print STDERR "$0 $version $last_update_token\n";
+
+# Check the hook interface version
+if ($version ne 2) {
+	die "Unsupported query-fsmonitor hook version '$version'.\n" .
+	    "Falling back to scanning...\n";
+}
+
+my $git_work_tree = get_working_dir();
+
+my $retry = 1;
+
+my $json_pkg;
+eval {
+	require JSON::XS;
+	$json_pkg = "JSON::XS";
+	1;
+} or do {
+	require JSON::PP;
+	$json_pkg = "JSON::PP";
+};
+
+launch_watchman();
+
+sub launch_watchman {
+	my $o = watchman_query();
+	if (is_work_tree_watched($o)) {
+		output_result($o->{clock}, @{$o->{files}});
+	}
+}
+
+sub output_result {
+	my ($clockid, @files) = @_;
+
+	# Uncomment for debugging watchman output
+	# open (my $fh, ">", ".git/watchman-output.out");
+	# binmode $fh, ":utf8";
+	# print $fh "$clockid\n@files\n";
+	# close $fh;
+
+	binmode STDOUT, ":utf8";
+	print $clockid;
+	print "\0";
+	local $, = "\0";
+	print @files;
+}
+
+sub watchman_clock {
+	my $response = qx/watchman clock "$git_work_tree"/;
+	die "Failed to get clock id on '$git_work_tree'.\n" .
+		"Falling back to scanning...\n" if $? != 0;
+
+	return $json_pkg->new->utf8->decode($response);
+}
+
+sub watchman_query {
+	my $pid = open2(\*CHLD_OUT, \*CHLD_IN, 'watchman -j --no-pretty')
+	or die "open2() failed: $!\n" .
+	"Falling back to scanning...\n";
+
+	# In the query expression below we're asking for names of files that
+	# changed since $last_update_token but not from the .git folder.
+	#
+	# To accomplish this, we're using the "since" generator to use the
+	# recency index to select candidate nodes and "fields" to limit the
+	# output to file names only. Then we're using the "expression" term to
+	# further constrain the results.
+	my $last_update_line = "";
+	if (substr($last_update_token, 0, 1) eq "c") {
+		$last_update_token = "\"$last_update_token\"";
+		$last_update_line = qq[\n"since": $last_update_token,];
+	}
+	my $query = <<"	END";
+		["query", "$git_work_tree", {$last_update_line
+			"fields": ["name"],
+			"expression": ["not", ["dirname", ".git"]]
+		}]
+	END
+
+	# Uncomment for debugging the watchman query
+	# open (my $fh, ">", ".git/watchman-query.json");
+	# print $fh $query;
+	# close $fh;
+
+	print CHLD_IN $query;
+	close CHLD_IN;
+	my $response = do {local $/; <CHLD_OUT>};
+
+	# Uncomment for debugging the watch response
+	# open ($fh, ">", ".git/watchman-response.json");
+	# print $fh $response;
+	# close $fh;
+
+	die "Watchman: command returned no output.\n" .
+	"Falling back to scanning...\n" if $response eq "";
+	die "Watchman: command returned invalid output: $response\n" .
+	"Falling back to scanning...\n" unless $response =~ /^\{/;
+
+	return $json_pkg->new->utf8->decode($response);
+}
+
+sub is_work_tree_watched {
+	my ($output) = @_;
+	my $error = $output->{error};
+	if ($retry > 0 and $error and $error =~ m/unable to resolve root .* directory (.*) is not watched/) {
+		$retry--;
+		my $response = qx/watchman watch "$git_work_tree"/;
+		die "Failed to make watchman watch '$git_work_tree'.\n" .
+		    "Falling back to scanning...\n" if $? != 0;
+		$output = $json_pkg->new->utf8->decode($response);
+		$error = $output->{error};
+		die "Watchman: $error.\n" .
+		"Falling back to scanning...\n" if $error;
+
+		# Uncomment for debugging watchman output
+		# open (my $fh, ">", ".git/watchman-output.out");
+		# close $fh;
+
+		# Watchman will always return all files on the first query so
+		# return the fast "everything is dirty" flag to git and do the
+		# Watchman query just to get it over with now so we won't pay
+		# the cost in git to look up each individual file.
+		my $o = watchman_clock();
+		$error = $output->{error};
+
+		die "Watchman: $error.\n" .
+		"Falling back to scanning...\n" if $error;
+
+		output_result($o->{clock}, ("/"));
+		$last_update_token = $o->{clock};
+
+		eval { launch_watchman() };
+		return 0;
+	}
+
+	die "Watchman: $error.\n" .
+	"Falling back to scanning...\n" if $error;
+
+	return 1;
+}
+
+sub get_working_dir {
+	my $working_dir;
+	if ($^O =~ 'msys' || $^O =~ 'cygwin') {
+		$working_dir = Win32::GetCwd();
+		$working_dir =~ tr/\\/\//;
+	} else {
+		require Cwd;
+		$working_dir = Cwd::cwd();
+	}
+
+	return $working_dir;
 }
 
 
-Datei: src\Admin\Pages\DashboardPage.php
-<?php
+Datei: .git\hooks\post-update.sample
+#!/bin/sh
+#
+# An example hook script to prepare a packed repository for use over
+# dumb transports.
+#
+# To enable this hook, rename this file to "post-update".
 
-namespace OSCT\Admin\Pages;
-
-use OSCT\Domain\Repos\OptionRepo;
-use OSCT\Domain\Repos\LanguageRepo;
-use OSCT\Domain\Repos\ContentRepo;
-use OSCT\Domain\Repos\JobsRepo;
-use OSCT\Translation\TranslationService;
-
-if (!defined('ABSPATH')) exit;
-
-final class DashboardPage
-{
-    private JobsRepo $jobs;
-
-    public function __construct(
-        private OptionRepo $opt,
-        private LanguageRepo $langsRepo,
-        private ContentRepo $content,
-        private TranslationService $translator,
-        ?JobsRepo $jobs = null
-    ) {
-        $this->jobs = $jobs ?: new JobsRepo();
-    }
-
-    public function render(): void
-    {
-        $o         = $this->opt->all();
-        $active    = (array)($o['languages_active'] ?? []);
-        $menuId    = (int)($o['menu_id'] ?? 0);
-        $menuName  = $menuId ? $this->content->menuName($menuId) : '';
-        $wlMenu    = (array)($o['page_whitelist'] ?? []);
-        $wlExtra   = (array)($o['page_whitelist_extra'] ?? []);
-        $wlBlocks  = (array)($o['block_whitelist'] ?? []);
-        $wlPages   = array_values(array_unique(array_map('intval', array_merge($wlMenu, $wlExtra))));
-        $langs     = $this->langsRepo->all();
-
-        $tr = get_transient('osct_translate_result');
-        delete_transient('osct_translate_result');
-
-        echo '<div class="wrap"><h1>OS Content Translator – Dashboard</h1>';
-        if ($tr && is_array($tr)) {
-            echo '<div class="notice notice-success is-dismissible"><p>Übersetzung abgeschlossen. Neu: ' . intval($tr['created']) . ', übersprungen: ' . intval($tr['skipped']) . '.</p></div>';
-        }
-
-        $menuDbg = get_transient('osct_menu_debug');
-        delete_transient('osct_menu_debug');
-        if ($menuDbg && is_array($menuDbg)) {
-            $s = $menuDbg['summary'] ?? [];
-            echo '<h2>Menü-Clone Debug</h2>';
-            echo '<p>Erstellt: ' . intval($s['created'] ?? 0) . ', Zuweisungen: ' . intval($s['assigned'] ?? 0) . ', Items: ' . intval($s['cloned_items'] ?? 0) . '</p>';
-            echo '<table class="widefat striped"><thead><tr>';
-            echo '<th>Zeit</th><th>Sprache</th><th>Ziel-Menü</th><th>Ziel-Menü-ID</th><th>Aktion</th><th>Status</th><th>Neu-ID</th><th>Src-ID</th><th>Typ</th><th>Objekt</th><th>Obj-ID</th><th>Titel</th><th>URL</th><th>Msg</th>';
-            echo '</tr></thead><tbody>';
-            foreach (($menuDbg['rows'] ?? []) as $r) {
-                echo '<tr>';
-                echo '<td>' . esc_html($r['ts']) . '</td>';
-                echo '<td>' . esc_html($r['lang'] ?? '') . '</td>';
-                echo '<td>' . esc_html($r['dst_menu'] ?? '') . '</td>';
-                echo '<td>' . intval($r['dst_menu_id'] ?? 0) . '</td>';
-                echo '<td>' . esc_html($r['action'] ?? '') . '</td>';
-                echo '<td>' . esc_html($r['status'] ?? '') . '</td>';
-                echo '<td>' . intval($r['new_item_id'] ?? 0) . '</td>';
-                echo '<td>' . intval($r['src_item_id'] ?? 0) . '</td>';
-                echo '<td>' . esc_html($r['type'] ?? '') . '</td>';
-                echo '<td>' . esc_html($r['object'] ?? '') . '</td>';
-                echo '<td>' . intval($r['object_id'] ?? 0) . '</td>';
-                echo '<td>' . esc_html($r['title'] ?? '') . '</td>';
-                echo '<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis">' . esc_html($r['url'] ?? '') . '</td>';
-                echo '<td>' . esc_html($r['message'] ?? '') . '</td>';
-                echo '</tr>';
-            }
-            echo '</tbody></table>';
-        }
-
-        echo '<h2>Status</h2><table class="widefat striped"><tbody>';
-        echo '<tr><td>Aktives Menü</td><td>' . ($menuId ? esc_html($menuName) . " (#{$menuId})" : '–') . '</td></tr>';
-        echo '<tr><td>Freigegebene Seiten</td><td>' . count($wlPages) . '</td></tr>';
-        echo '<tr><td>Freigegebene Blöcke</td><td>' . count($wlBlocks) . '</td></tr>';
-        echo '<tr><td>Aktive Zielsprachen</td><td>' . esc_html(implode(', ', $active)) . '</td></tr>';
-        echo '</tbody></table>';
-
-        $defaultLang = $this->langsRepo->default();
-        $totalJobs = $this->jobs->countAll();
-        $anyTranslated = $this->jobs->countAnyTranslated($active);
-        echo '<h2>Stellenangebote</h2>';
-        echo '<table class="widefat striped"><tbody>';
-        echo '<tr><td>Gesamt</td><td>' . intval($totalJobs) . '</td></tr>';
-        echo '<tr><td>Bereits eingesetzt (mind. 1 Sprache)</td><td>' . intval($anyTranslated) . ' / ' . intval($totalJobs) . ' (' . ($totalJobs ? round($anyTranslated / $totalJobs * 100) : 0) . '%)</td></tr>';
-        echo '</tbody></table>';
-
-        if (!empty($active) && $totalJobs > 0) {
-            echo '<h3>Übersetzungsstand je Zielsprache</h3>';
-            echo '<table class="widefat striped"><thead><tr><th>Sprache</th><th>Übersetzt</th><th>Anteil</th></tr></thead><tbody>';
-            foreach ($active as $l) {
-                if ($l === $defaultLang) continue;
-                $done = $this->jobs->countTranslated($l);
-                $pct = $totalJobs ? round($done / $totalJobs * 100) : 0;
-                echo '<tr><td>' . esc_html($l) . '</td><td>' . intval($done) . ' / ' . intval($totalJobs) . '</td><td>' . $pct . '%</td></tr>';
-            }
-            echo '</tbody></table>';
-        }
-
-        echo '<h2>Schneller Trockenlauf</h2>';
-        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
-        echo '<input type="hidden" name="action" value="osct_do_dry_run">';
-        wp_nonce_field('osct_do_dry_run');
-        echo '<p><button class="button button-primary">Trockenlauf starten</button> ';
-        echo '<a class="button" href="' . esc_url(add_query_arg(['page' => 'osct-settings'], admin_url('admin.php'))) . '">Einstellungen</a></p></form>';
-
-        echo '<h2>Übersetzung starten</h2>';
-        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
-        echo '<input type="hidden" name="action" value="osct_do_translate">';
-        wp_nonce_field('osct_do_translate');
-        echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_test" value="1" checked> Testlauf</label></p>';
-        echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_jobs" value="1"> Stellenanzeigen</label></p>';
-        echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_menu_pages" value="1"> Seiten im gewählten Menü</label></p>';
-        echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_extra_pages" value="1"> Standardseiten</label></p>';
-        echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_blocks" value="1"> Reusable Blocks</label></p>';
-        echo '<p style="margin-top:12px"><label><input type="checkbox" name="osct_force" value="1"> Force: vorhandene Zielversionen trotz "OK" neu übersetzen</label></p>';
-        echo '<p>Übersetzt nur die aktivierten Gruppen in die aktiven Zielsprachen.</p>';
-        echo '<p><button class="button button-primary">Übersetzung jetzt ausführen</button> ';
-        echo '<a class="button" href="' . esc_url(add_query_arg(['page' => 'osct-debug'], admin_url('admin.php'))) . '">Letzter Lauf (Debug)</a></p>';
-        echo '</form>';
+exec git update-server-info
 
 
-        if (!empty($active) && !empty($wlPages)) {
-            echo '<h2>Seiten × Sprachen</h2><table class="widefat striped"><thead><tr><th>Seite</th>';
-            foreach ($active as $l) echo '<th>' . esc_html($l) . '</th>';
-            echo '</tr></thead><tbody>';
-            $pages = $this->content->getPostsByIds($wlPages, 'page');
-            foreach ($pages as $p) {
-                echo '<tr><td>#' . $p->ID . ' ' . esc_html(get_the_title($p)) . '</td>';
-                foreach ($active as $l) echo '<td>' . $this->badge($this->translator->state($p->ID, $l)) . '</td>';
-                echo '</tr>';
-            }
-            echo '</tbody></table>';
-        }
+Datei: .git\hooks\pre-applypatch.sample
+#!/bin/sh
+#
+# An example hook script to verify what is about to be committed
+# by applypatch from an e-mail message.
+#
+# The hook should exit with non-zero status after issuing an
+# appropriate message if it wants to stop the commit.
+#
+# To enable this hook, rename this file to "pre-applypatch".
 
-        if (!empty($active) && !empty($wlBlocks)) {
-            echo '<h2>Reusable Blocks × Sprachen</h2><table class="widefat striped"><thead><tr><th>Block</th>';
-            foreach ($active as $l) echo '<th>' . esc_html($l) . '</th>';
-            echo '</tr></thead><tbody>';
-            $blocks = $this->content->getPostsByIds($wlBlocks, 'wp_block');
-            foreach ($blocks as $b) {
-                echo '<tr><td>#' . $b->ID . ' ' . esc_html(get_the_title($b)) . '</td>';
-                foreach ($active as $l) echo '<td>' . $this->badge($this->translator->state($b->ID, $l)) . '</td>';
-                echo '</tr>';
-            }
-            echo '</tbody></table>';
-        }
+. git-sh-setup
+precommit="$(git rev-parse --git-path hooks/pre-commit)"
+test -x "$precommit" && exec "$precommit" ${1+"$@"}
+:
 
-        echo '<h2>Freigegebene Inhalte</h2>';
-        echo '<table class="widefat striped"><thead><tr>';
-        echo '<th>ID</th><th>Titel</th><th>Permalink</th><th>Typ</th><th>Quelle</th>';
-        echo '</tr></thead><tbody>';
 
-        if (!empty($wlPages)) {
-            $posts = $this->content->getPostsByIds($wlPages, 'page');
-            foreach ($posts as $p) {
-                $quelle = in_array($p->ID, $wlMenu, true) ? 'Menü' : 'Manuell';
-                echo '<tr>';
-                echo '<td>#' . (int)$p->ID . '</td>';
-                echo '<td>' . esc_html(get_the_title($p)) . '</td>';
-                echo '<td><a href="' . esc_url(get_permalink($p)) . '" target="_blank">' . esc_html(get_permalink($p)) . '</a></td>';
-                echo '<td>page</td>';
-                echo '<td>' . $quelle . '</td>';
-                echo '</tr>';
-            }
-        }
+Datei: .git\hooks\pre-commit.sample
+#!/bin/sh
+#
+# An example hook script to verify what is about to be committed.
+# Called by "git commit" with no arguments.  The hook should
+# exit with non-zero status after issuing an appropriate message if
+# it wants to stop the commit.
+#
+# To enable this hook, rename this file to "pre-commit".
 
-        if (!empty($wlBlocks)) {
-            $blocks = $this->content->getPostsByIds($wlBlocks, 'wp_block');
-            foreach ($blocks as $b) {
-                echo '<tr>';
-                echo '<td>#' . (int)$b->ID . '</td>';
-                echo '<td>' . esc_html(get_the_title($b)) . '</td>';
-                echo '<td><a href="' . esc_url(get_edit_post_link($b->ID)) . '" target="_blank">' . esc_html(get_edit_post_link($b->ID)) . '</a></td>';
-                echo '<td>wp_block</td>';
-                echo '<td>Block</td>';
-                echo '</tr>';
-            }
-        }
-        echo '</tbody></table>';
+if git rev-parse --verify HEAD >/dev/null 2>&1
+then
+	against=HEAD
+else
+	# Initial commit: diff against an empty tree object
+	against=$(git hash-object -t tree /dev/null)
+fi
 
-        echo '</div>';
-    }
+# If you want to allow non-ASCII filenames set this variable to true.
+allownonascii=$(git config --type=bool hooks.allownonascii)
 
-    private function badge(string $s): string
-    {
-        return $s === 'ok' ? '<span style="color:#0a0">OK</span>' : ($s === 'stale' ? '<span style="color:#e69500">Veraltet</span>' :
-            '<span style="color:#a00">Fehlt</span>');
-    }
+# Redirect output to stderr.
+exec 1>&2
+
+# Cross platform projects tend to avoid non-ASCII filenames; prevent
+# them from being added to the repository. We exploit the fact that the
+# printable range starts at the space character and ends with tilde.
+if [ "$allownonascii" != "true" ] &&
+	# Note that the use of brackets around a tr range is ok here, (it's
+	# even required, for portability to Solaris 10's /usr/bin/tr), since
+	# the square bracket bytes happen to fall in the designated range.
+	test $(git diff-index --cached --name-only --diff-filter=A -z $against |
+	  LC_ALL=C tr -d '[ -~]\0' | wc -c) != 0
+then
+	cat <<\EOF
+Error: Attempt to add a non-ASCII file name.
+
+This can cause problems if you want to work with people on other platforms.
+
+To be portable it is advisable to rename the file.
+
+If you know what you are doing you can disable this check using:
+
+  git config hooks.allownonascii true
+EOF
+	exit 1
+fi
+
+# If there are whitespace errors, print the offending file names and fail.
+exec git diff-index --check --cached $against --
+
+
+Datei: .git\hooks\pre-merge-commit.sample
+#!/bin/sh
+#
+# An example hook script to verify what is about to be committed.
+# Called by "git merge" with no arguments.  The hook should
+# exit with non-zero status after issuing an appropriate message to
+# stderr if it wants to stop the merge commit.
+#
+# To enable this hook, rename this file to "pre-merge-commit".
+
+. git-sh-setup
+test -x "$GIT_DIR/hooks/pre-commit" &&
+        exec "$GIT_DIR/hooks/pre-commit"
+:
+
+
+Datei: .git\hooks\pre-push.sample
+#!/bin/sh
+
+# An example hook script to verify what is about to be pushed.  Called by "git
+# push" after it has checked the remote status, but before anything has been
+# pushed.  If this script exits with a non-zero status nothing will be pushed.
+#
+# This hook is called with the following parameters:
+#
+# $1 -- Name of the remote to which the push is being done
+# $2 -- URL to which the push is being done
+#
+# If pushing without using a named remote those arguments will be equal.
+#
+# Information about the commits which are being pushed is supplied as lines to
+# the standard input in the form:
+#
+#   <local ref> <local oid> <remote ref> <remote oid>
+#
+# This sample shows how to prevent push of commits where the log message starts
+# with "WIP" (work in progress).
+
+remote="$1"
+url="$2"
+
+zero=$(git hash-object --stdin </dev/null | tr '[0-9a-f]' '0')
+
+while read local_ref local_oid remote_ref remote_oid
+do
+	if test "$local_oid" = "$zero"
+	then
+		# Handle delete
+		:
+	else
+		if test "$remote_oid" = "$zero"
+		then
+			# New branch, examine all commits
+			range="$local_oid"
+		else
+			# Update to existing branch, examine new commits
+			range="$remote_oid..$local_oid"
+		fi
+
+		# Check for WIP commit
+		commit=$(git rev-list -n 1 --grep '^WIP' "$range")
+		if test -n "$commit"
+		then
+			echo >&2 "Found WIP commit in $local_ref, not pushing"
+			exit 1
+		fi
+	fi
+done
+
+exit 0
+
+
+Datei: .git\hooks\pre-rebase.sample
+#!/bin/sh
+#
+# Copyright (c) 2006, 2008 Junio C Hamano
+#
+# The "pre-rebase" hook is run just before "git rebase" starts doing
+# its job, and can prevent the command from running by exiting with
+# non-zero status.
+#
+# The hook is called with the following parameters:
+#
+# $1 -- the upstream the series was forked from.
+# $2 -- the branch being rebased (or empty when rebasing the current branch).
+#
+# This sample shows how to prevent topic branches that are already
+# merged to 'next' branch from getting rebased, because allowing it
+# would result in rebasing already published history.
+
+publish=next
+basebranch="$1"
+if test "$#" = 2
+then
+	topic="refs/heads/$2"
+else
+	topic=`git symbolic-ref HEAD` ||
+	exit 0 ;# we do not interrupt rebasing detached HEAD
+fi
+
+case "$topic" in
+refs/heads/??/*)
+	;;
+*)
+	exit 0 ;# we do not interrupt others.
+	;;
+esac
+
+# Now we are dealing with a topic branch being rebased
+# on top of master.  Is it OK to rebase it?
+
+# Does the topic really exist?
+git show-ref -q "$topic" || {
+	echo >&2 "No such branch $topic"
+	exit 1
 }
 
+# Is topic fully merged to master?
+not_in_master=`git rev-list --pretty=oneline ^master "$topic"`
+if test -z "$not_in_master"
+then
+	echo >&2 "$topic is fully merged to master; better remove it."
+	exit 1 ;# we could allow it, but there is no point.
+fi
 
-Datei: src\Admin\Pages\DebugPage.php
-<?php
+# Is topic ever merged to next?  If so you should not be rebasing it.
+only_next_1=`git rev-list ^master "^$topic" ${publish} | sort`
+only_next_2=`git rev-list ^master           ${publish} | sort`
+if test "$only_next_1" = "$only_next_2"
+then
+	not_in_topic=`git rev-list "^$topic" master`
+	if test -z "$not_in_topic"
+	then
+		echo >&2 "$topic is already up to date with master"
+		exit 1 ;# we could allow it, but there is no point.
+	else
+		exit 0
+	fi
+else
+	not_in_next=`git rev-list --pretty=oneline ^${publish} "$topic"`
+	/usr/bin/perl -e '
+		my $topic = $ARGV[0];
+		my $msg = "* $topic has commits already merged to public branch:\n";
+		my (%not_in_next) = map {
+			/^([0-9a-f]+) /;
+			($1 => 1);
+		} split(/\n/, $ARGV[1]);
+		for my $elem (map {
+				/^([0-9a-f]+) (.*)$/;
+				[$1 => $2];
+			} split(/\n/, $ARGV[2])) {
+			if (!exists $not_in_next{$elem->[0]}) {
+				if ($msg) {
+					print STDERR $msg;
+					undef $msg;
+				}
+				print STDERR " $elem->[1]\n";
+			}
+		}
+	' "$topic" "$not_in_next" "$not_in_master"
+	exit 1
+fi
 
-namespace OSCT\Admin\Pages;
+<<\DOC_END
 
-use OSCT\Domain\Repos\LogRepo;
+This sample hook safeguards topic branches that have been
+published from being rewound.
 
-if (!defined('ABSPATH')) exit;
+The workflow assumed here is:
 
-final class DebugPage
-{
-    private LogRepo $logs;
+ * Once a topic branch forks from "master", "master" is never
+   merged into it again (either directly or indirectly).
 
-    public function __construct()
-    {
-        $this->logs = new LogRepo();
-    }
+ * Once a topic branch is fully cooked and merged into "master",
+   it is deleted.  If you need to build on top of it to correct
+   earlier mistakes, a new topic branch is created by forking at
+   the tip of the "master".  This is not strictly necessary, but
+   it makes it easier to keep your history simple.
 
-    public function render(): void
-    {
-        global $wpdb;
+ * Whenever you need to test or publish your changes to topic
+   branches, merge them into "next" branch.
 
-        $runId = $this->logs->lastRunId();
-        echo '<div class="wrap"><h1>OS Content Translator – Letzter Lauf (Debug)</h1>';
+The script, being an example, hardcodes the publish branch name
+to be "next", but it is trivial to make it configurable via
+$GIT_DIR/config mechanism.
 
-        if (!$runId) {
-            echo '<p>Keine Läufe vorhanden.</p></div>';
-            return;
-        }
+With this workflow, you would want to know:
 
-        $table = $wpdb->prefix . 'osct_translation_log';
-        $rows = $wpdb->get_results(
-            $wpdb->prepare("SELECT * FROM {$table} WHERE run_id=%s ORDER BY id ASC", $runId),
-            ARRAY_A
-        );
+(1) ... if a topic branch has ever been merged to "next".  Young
+    topic branches can have stupid mistakes you would rather
+    clean up before publishing, and things that have not been
+    merged into other branches can be easily rebased without
+    affecting other people.  But once it is published, you would
+    not want to rewind it.
 
-        $started = $rows ? $rows[0]['created_at'] : '–';
-        $ended   = $rows ? $rows[count($rows) - 1]['created_at'] : '–';
+(2) ... if a topic branch has been fully merged to "master".
+    Then you can delete it.  More importantly, you should not
+    build on top of it -- other people may already want to
+    change things related to the topic as patches against your
+    "master", so if you need further changes, it is better to
+    fork the topic (perhaps with the same name) afresh from the
+    tip of "master".
 
-        $sumWords = 0;
-        $sumChars = 0;
-        foreach ($rows as $r) {
-            $sumWords += (int)$r['words_title'] + (int)$r['words_content'];
-            $sumChars += (int)$r['chars_title'] + (int)$r['chars_content'];
-        }
+Let's look at this example:
 
-        $jobSum = $this->logs->lastRunJobSummary();
+		   o---o---o---o---o---o---o---o---o---o "next"
+		  /       /           /           /
+		 /   a---a---b A     /           /
+		/   /               /           /
+	       /   /   c---c---c---c B         /
+	      /   /   /             \         /
+	     /   /   /   b---b C     \       /
+	    /   /   /   /             \     /
+    ---o---o---o---o---o---o---o---o---o---o---o "master"
 
-        echo '<p><strong>Run-ID:</strong> ' . esc_html($runId) . ' &nbsp; ';
-        echo '<strong>Start:</strong> ' . esc_html($started) . ' &nbsp; ';
-        echo '<strong>Ende:</strong> ' . esc_html($ended) . '</p>';
 
-        echo '<p><strong>Gesamt Wörter:</strong> ' . intval($sumWords) .
-            ' &nbsp; <strong>Gesamt Zeichen:</strong> ' . intval($sumChars) . '</p>';
+A, B and C are topic branches.
 
-        echo '<h2>Stellenangebote – Zusammenfassung (dieser Lauf)</h2>';
-        echo '<table class="widefat striped"><tbody>';
-        echo '<tr><td>Einträge (create/update)</td><td>' . intval($jobSum['entries'] ?? 0) . '</td></tr>';
-        echo '<tr><td>Wörter</td><td>' . intval($jobSum['words'] ?? 0) . '</td></tr>';
-        echo '<tr><td>Zeichen</td><td>' . intval($jobSum['chars'] ?? 0) . '</td></tr>';
-        echo '</tbody></table>';
+ * A has one fix since it was merged up to "next".
 
-        echo '<h2>Schritte</h2>';
-        echo '<table class="widefat striped"><thead><tr>';
-        echo '<th>Zeit</th>';
-        echo '<th>Post</th>';
-        echo '<th>JobID</th>'; // NEU
-        echo '<th>Typ</th>';
-        echo '<th>Quelle→Ziel</th>';
-        echo '<th>Provider</th>';
-        echo '<th>Aktion</th>';
-        echo '<th>Status</th>';
-        echo '<th>SrcHash</th>';
-        echo '<th>Wörter</th>';
-        echo '<th>Zeichen</th>';
-        echo '<th>Nachricht</th>';
-        echo '</tr></thead><tbody>';
+ * B has finished.  It has been fully merged up to "master" and "next",
+   and is ready to be deleted.
 
-        foreach ($rows as $r) {
-            $postId = (int)$r['post_id'];
-            $type   = $r['post_type'];
+ * C has not merged to "next" at all.
 
-            $postLabel = ($postId === 0 && $type === 'job') ? '–' : ('#' . $postId);
+We would want to allow C to be rebased, refuse A, and encourage
+B to be deleted.
 
-            // JobID aus message extrahieren: [job <id>] oder job_id=<id>
-            $jobId = '';
-            if (preg_match('/\\[job\\s+([^\\]]+)\\]/i', (string)$r['message'], $m)) {
-                $jobId = $m[1];
-            } elseif (preg_match('/\\bjob_id=([a-f0-9\\-]{8,})/i', (string)$r['message'], $m)) {
-                $jobId = $m[1];
-            }
+To compute (1):
 
-            $words  = (int)$r['words_title'] + (int)$r['words_content'];
-            $chars  = (int)$r['chars_title'] + (int)$r['chars_content'];
+	git rev-list ^master ^topic next
+	git rev-list ^master        next
 
-            echo '<tr>';
-            echo '<td>' . esc_html($r['created_at']) . '</td>';
-            echo '<td>' . esc_html($postLabel) . '</td>';
-            echo '<td>' . esc_html($jobId ?: '–') . '</td>';
-            echo '<td>' . esc_html($type) . '</td>';
-            echo '<td>' . esc_html($r['source_lang'] . ' → ' . $r['target_lang']) . '</td>';
-            echo '<td>' . esc_html($r['provider']) . '</td>';
-            echo '<td>' . esc_html($r['action']) . '</td>';
-            echo '<td>' . esc_html($r['status']) . '</td>';
-            echo '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis">' . esc_html($r['src_hash']) . '</td>';
-            echo '<td>' . intval($words) . '</td>';
-            echo '<td>' . intval($chars) . '</td>';
-            echo '<td>' . esc_html($r['message']) . '</td>';
-            echo '</tr>';
-        }
+	if these match, topic has not merged in next at all.
 
-        echo '</tbody></table>';
-        echo '</div>';
-    }
+To compute (2):
+
+	git rev-list master..topic
+
+	if this is empty, it is fully merged to "master".
+
+DOC_END
+
+
+Datei: .git\hooks\pre-receive.sample
+#!/bin/sh
+#
+# An example hook script to make use of push options.
+# The example simply echoes all push options that start with 'echoback='
+# and rejects all pushes when the "reject" push option is used.
+#
+# To enable this hook, rename this file to "pre-receive".
+
+if test -n "$GIT_PUSH_OPTION_COUNT"
+then
+	i=0
+	while test "$i" -lt "$GIT_PUSH_OPTION_COUNT"
+	do
+		eval "value=\$GIT_PUSH_OPTION_$i"
+		case "$value" in
+		echoback=*)
+			echo "echo from the pre-receive-hook: ${value#*=}" >&2
+			;;
+		reject)
+			exit 1
+		esac
+		i=$((i + 1))
+	done
+fi
+
+
+Datei: .git\hooks\prepare-commit-msg.sample
+#!/bin/sh
+#
+# An example hook script to prepare the commit log message.
+# Called by "git commit" with the name of the file that has the
+# commit message, followed by the description of the commit
+# message's source.  The hook's purpose is to edit the commit
+# message file.  If the hook fails with a non-zero status,
+# the commit is aborted.
+#
+# To enable this hook, rename this file to "prepare-commit-msg".
+
+# This hook includes three examples. The first one removes the
+# "# Please enter the commit message..." help message.
+#
+# The second includes the output of "git diff --name-status -r"
+# into the message, just before the "git status" output.  It is
+# commented because it doesn't cope with --amend or with squashed
+# commits.
+#
+# The third example adds a Signed-off-by line to the message, that can
+# still be edited.  This is rarely a good idea.
+
+COMMIT_MSG_FILE=$1
+COMMIT_SOURCE=$2
+SHA1=$3
+
+/usr/bin/perl -i.bak -ne 'print unless(m/^. Please enter the commit message/..m/^#$/)' "$COMMIT_MSG_FILE"
+
+# case "$COMMIT_SOURCE,$SHA1" in
+#  ,|template,)
+#    /usr/bin/perl -i.bak -pe '
+#       print "\n" . `git diff --cached --name-status -r`
+# 	 if /^#/ && $first++ == 0' "$COMMIT_MSG_FILE" ;;
+#  *) ;;
+# esac
+
+# SOB=$(git var GIT_COMMITTER_IDENT | sed -n 's/^\(.*>\).*$/Signed-off-by: \1/p')
+# git interpret-trailers --in-place --trailer "$SOB" "$COMMIT_MSG_FILE"
+# if test -z "$COMMIT_SOURCE"
+# then
+#   /usr/bin/perl -i.bak -pe 'print "\n" if !$first_line++' "$COMMIT_MSG_FILE"
+# fi
+
+
+Datei: .git\hooks\push-to-checkout.sample
+#!/bin/sh
+
+# An example hook script to update a checked-out tree on a git push.
+#
+# This hook is invoked by git-receive-pack(1) when it reacts to git
+# push and updates reference(s) in its repository, and when the push
+# tries to update the branch that is currently checked out and the
+# receive.denyCurrentBranch configuration variable is set to
+# updateInstead.
+#
+# By default, such a push is refused if the working tree and the index
+# of the remote repository has any difference from the currently
+# checked out commit; when both the working tree and the index match
+# the current commit, they are updated to match the newly pushed tip
+# of the branch. This hook is to be used to override the default
+# behaviour; however the code below reimplements the default behaviour
+# as a starting point for convenient modification.
+#
+# The hook receives the commit with which the tip of the current
+# branch is going to be updated:
+commit=$1
+
+# It can exit with a non-zero status to refuse the push (when it does
+# so, it must not modify the index or the working tree).
+die () {
+	echo >&2 "$*"
+	exit 1
 }
 
+# Or it can make any necessary changes to the working tree and to the
+# index to bring them to the desired state when the tip of the current
+# branch is updated to the new commit, and exit with a zero status.
+#
+# For example, the hook can simply run git read-tree -u -m HEAD "$1"
+# in order to emulate git fetch that is run in the reverse direction
+# with git push, as the two-tree form of git read-tree -u -m is
+# essentially the same as git switch or git checkout that switches
+# branches while keeping the local changes in the working tree that do
+# not interfere with the difference between the branches.
 
-Datei: src\Admin\Pages\DryRunPage.php
-<?php
-namespace OSCT\Admin\Pages;
-use OSCT\Domain\Repos\OptionRepo;
-use OSCT\Domain\Repos\LanguageRepo;
-use OSCT\Domain\Repos\ContentRepo;
-use OSCT\Translation\TranslationService;
+# The below is a more-or-less exact translation to shell of the C code
+# for the default behaviour for git's push-to-checkout hook defined in
+# the push_to_deploy() function in builtin/receive-pack.c.
+#
+# Note that the hook will be executed from the repository directory,
+# not from the working tree, so if you want to perform operations on
+# the working tree, you will have to adapt your code accordingly, e.g.
+# by adding "cd .." or using relative paths.
 
-if (!defined('ABSPATH')) exit;
+if ! git update-index -q --ignore-submodules --refresh
+then
+	die "Up-to-date check failed"
+fi
 
-final class DryRunPage {
-    public function __construct(
-        private OptionRepo $opt,
-        private LanguageRepo $langs,
-        private ContentRepo $content,
-        private TranslationService $translator
-    ) {}
+if ! git diff-files --quiet --ignore-submodules --
+then
+	die "Working directory has unstaged changes"
+fi
 
-    public function render(): void {
-        $res = get_transient('osct_dry_result'); delete_transient('osct_dry_result');
-        echo '<div class="wrap"><h1>OS Content Translator – Trockenlauf</h1>';
-        if ($res) {
-            echo '<h2>Ergebnis</h2>';
-            echo '<pre style="background:#fff;border:1px solid #ddd;padding:12px;max-height:400px;overflow:auto">'.esc_html(print_r($res,true)).'</pre>';
-        } else {
-            echo '<p>Noch kein Trockenlauf ausgeführt.</p>';
-        }
-        echo '<p><a class="button" href="'.esc_url(add_query_arg(['page'=>'osct-dashboard'], admin_url('admin.php'))).'">Zurück zum Dashboard</a></p>';
-        echo '</div>';
-    }
+# This is a rough translation of:
+#
+#   head_has_history() ? "HEAD" : EMPTY_TREE_SHA1_HEX
+if git cat-file -e HEAD 2>/dev/null
+then
+	head=HEAD
+else
+	head=$(git hash-object -t tree --stdin </dev/null)
+fi
+
+if ! git diff-index --quiet --cached --ignore-submodules $head --
+then
+	die "Working directory has staged changes"
+fi
+
+if ! git read-tree -u -m "$commit"
+then
+	die "Could not update working tree to new HEAD"
+fi
+
+
+Datei: .git\hooks\sendemail-validate.sample
+#!/bin/sh
+
+# An example hook script to validate a patch (and/or patch series) before
+# sending it via email.
+#
+# The hook should exit with non-zero status after issuing an appropriate
+# message if it wants to prevent the email(s) from being sent.
+#
+# To enable this hook, rename this file to "sendemail-validate".
+#
+# By default, it will only check that the patch(es) can be applied on top of
+# the default upstream branch without conflicts in a secondary worktree. After
+# validation (successful or not) of the last patch of a series, the worktree
+# will be deleted.
+#
+# The following config variables can be set to change the default remote and
+# remote ref that are used to apply the patches against:
+#
+#   sendemail.validateRemote (default: origin)
+#   sendemail.validateRemoteRef (default: HEAD)
+#
+# Replace the TODO placeholders with appropriate checks according to your
+# needs.
+
+validate_cover_letter () {
+	file="$1"
+	# TODO: Replace with appropriate checks (e.g. spell checking).
+	true
 }
 
-
-Datei: src\Admin\Pages\JobsPage.php
-<?php
-
-namespace OSCT\Admin\Pages;
-
-use OSCT\Domain\Repos\OptionRepo;
-use OSCT\Domain\Repos\LanguageRepo;
-use OSCT\Domain\Repos\JobsRepo;
-
-if (!defined('ABSPATH')) exit;
-
-final class JobsPage
-{
-  public function __construct(
-    private OptionRepo $opt,
-    private LanguageRepo $langs,
-    private JobsRepo $repo
-  ) {}
-
-  public function render(): void
-  {
-    $activeLangs = (array)$this->opt->get('languages_active', []);
-    $defaultLang = $this->langs->default();
-
-    // Zielsprachen ohne Default
-    $allTargetLangs = array_values(array_filter($activeLangs, fn($l) => $l !== $defaultLang));
-
-    // --- Filter & Sorting ---
-    $s        = isset($_GET['s']) ? sanitize_text_field($_GET['s']) : '';
-    $filterL  = isset($_GET['lang']) ? sanitize_text_field($_GET['lang']) : '';
-    $orderby  = isset($_GET['orderby']) ? sanitize_text_field($_GET['orderby']) : 'job_id';
-    $order    = (isset($_GET['order']) && strtolower($_GET['order']) === 'desc') ? 'desc' : 'asc';
-    $paged    = isset($_GET['paged']) ? max(1, (int)$_GET['paged']) : 1;
-    $perPage  = 50;
-
-    // „gültige“ Filter-Sprache
-    $hasLangFilter = ($filterL !== '' && in_array($filterL, $allTargetLangs, true));
-    $columnLangs   = $hasLangFilter ? [$filterL] : $allTargetLangs;
-
-    // Source-Rows
-    $rows = $this->repo->all();
-
-    // Suche
-    if ($s !== '') {
-      $needle = mb_strtolower($s);
-      $rows = array_values(array_filter($rows, function ($r) use ($needle) {
-        $jid = mb_strtolower((string)($r['job_id'] ?? ''));
-        $jnm = mb_strtolower((string)($r['job_name'] ?? ''));
-        return (str_contains($jid, $needle) || str_contains($jnm, $needle));
-      }));
-    }
-
-    // Aufbereiten
-    $data = [];
-    foreach ($rows as $r) {
-      $jobId   = (string)($r['job_id'] ?? '');
-      $jobName = (string)($r['job_name'] ?? '');
-      $rowId   = $r['id'] ?? ($r['ID'] ?? '–');
-
-      // Status pro (sichtbarer) Sprache
-      $translated = 0;
-      $langsState = [];
-      foreach ($columnLangs as $lang) {
-        $tr = $this->repo->getTranslation($jobId, $lang);
-        $ok = $tr ? 1 : 0;
-        $translated += $ok;
-        $langsState[$lang] = [
-          'ok'         => $ok,
-          'updated_at' => $tr['updated_at'] ?? null,
-        ];
-      }
-
-      // „Zuletzt aktualisiert“:
-      // - wenn Sprachfilter aktiv: updated_at für diese Sprache
-      // - sonst: Max(updated_at) über alle Übersetzungen
-      $lastUpdated = null;
-      if ($hasLangFilter) {
-        $lastUpdated = $langsState[$filterL]['updated_at'] ?? null;
-      } else {
-        $allTr = $this->repo->allTranslationsForJob($jobId);
-        foreach ($allTr as $tr) {
-          $ts = $tr['updated_at'] ?? null;
-          if ($ts && (!$lastUpdated || strcmp($ts, $lastUpdated) > 0)) {
-            $lastUpdated = $ts;
-          }
-        }
-      }
-
-      $data[] = [
-        '_row_id'       => $rowId,
-        'job_id'        => $jobId,
-        'job_name'      => $jobName,
-        '_translated'   => $translated,
-        '_langs'        => $langsState,
-        '_updated_at'   => $lastUpdated, // GMT (current_time('mysql', true))
-      ];
-    }
-
-    // Sortierung
-    usort($data, function ($a, $b) use ($orderby, $order, $columnLangs, $hasLangFilter, $filterL) {
-      $cmp = 0;
-      switch ($orderby) {
-        case 'job_id':
-          $cmp = strnatcmp((string)$a['job_id'], (string)$b['job_id']);
-          break;
-        case 'job_name':
-          $cmp = strnatcmp((string)$a['job_name'], (string)$b['job_name']);
-          break;
-        case 'translated':
-          $cmp = ($a['_translated'] <=> $b['_translated']);
-          break;
-        case 'updated_at':
-          $au = $a['_updated_at'] ?? '';
-          $bu = $b['_updated_at'] ?? '';
-          // leere nach hinten
-          if ($au === '' && $bu !== '') $cmp = -1;
-          elseif ($au !== '' && $bu === '') $cmp = 1;
-          else $cmp = strnatcmp($au, $bu);
-          break;
-        default:
-          // Sortierung pro Sprachspalte: ✓ (1) vor – (0)
-          if (in_array($orderby, $columnLangs, true)) {
-            $av = (int)($a['_langs'][$orderby]['ok'] ?? 0);
-            $bv = (int)($b['_langs'][$orderby]['ok'] ?? 0);
-            $cmp = ($av <=> $bv);
-            break;
-          }
-          $cmp = 0;
-      }
-      return ($order === 'desc') ? -$cmp : $cmp;
-    });
-
-    // Pagination
-    $total   = count($data);
-    $pages   = max(1, (int)ceil($total / $perPage));
-    $offset  = ($paged - 1) * $perPage;
-    $slice   = array_slice($data, $offset, $perPage);
-
-    echo '<div class="wrap"><h1>OS Content Translator – Jobs-Übersicht</h1>';
-
-    // Filterleiste
-    echo '<form method="get" action="">';
-    echo '<input type="hidden" name="page" value="osct-jobs">';
-    echo '<p style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">';
-    echo '<input type="search" name="s" value="' . esc_attr($s) . '" placeholder="JobID oder Jobname" class="regular-text" style="max-width:260px">';
-    echo '<label>Sprache: ';
-    echo '<select name="lang">';
-    echo '<option value="">Alle</option>';
-    foreach ($allTargetLangs as $L) {
-      echo '<option value="' . esc_attr($L) . '" ' . selected($filterL, $L, false) . '>' . esc_html(strtoupper($L)) . '</option>';
-    }
-    echo '</select></label>';
-    echo '<button class="button">Filtern</button>';
-    echo '<a class="button" href="' . esc_url(add_query_arg(['page' => 'osct-jobs'], admin_url('admin.php'))) . '">Zurücksetzen</a>';
-    echo '</p>';
-    echo '</form>';
-
-    // Summen (auf Basis sichtbarer Sprachspalten)
-    $sumTranslated = array_sum(array_map(fn($r) => (int)$r['_translated'], $data));
-    echo '<p><strong>Gesamt Jobs:</strong> ' . intval($total) . '. ';
-    echo '<strong>Summe Übersetzungen (in sichtbaren Sprachen):</strong> ' . intval($sumTranslated) . '.</p>';
-
-    // Sortable-Header Helper
-    $makeSort = function ($key, $label) use ($orderby, $order, $s, $paged, $filterL) {
-      $newOrder = ($orderby === $key && $order === 'asc') ? 'desc' : 'asc';
-      $url = add_query_arg([
-        'page'    => 'osct-jobs',
-        's'       => $s,
-        'lang'    => $filterL,
-        'orderby' => $key,
-        'order'   => $newOrder,
-        'paged'   => $paged
-      ], admin_url('admin.php'));
-      $arrow = '';
-      if ($orderby === $key) $arrow = $order === 'asc' ? ' ↑' : ' ↓';
-      return '<a href="' . esc_url($url) . '">' . esc_html($label . $arrow) . '</a>';
-    };
-
-    echo '<table class="widefat striped"><thead><tr>';
-    echo '<th>' . $makeSort('row_id', 'ID') . '</th>';
-    echo '<th>' . $makeSort('job_id', 'JobID') . '</th>';
-    echo '<th>' . $makeSort('job_name', 'Jobname') . '</th>';
-    echo '<th>' . $makeSort('translated', 'Übersetzt (Anz.)') . '</th>';
-    // pro sichtbarer Sprache eine Spalte
-    foreach ($columnLangs as $lang) {
-      echo '<th>' . $makeSort($lang, strtoupper(esc_html($lang))) . '</th>';
-    }
-    echo '<th>' . $makeSort('updated_at', 'Zuletzt aktualisiert') . '</th>';
-    echo '</tr></thead><tbody>';
-
-    if (!$slice) {
-      echo '<tr><td colspan="' . (5 + count($columnLangs)) . '"><em>Keine Einträge.</em></td></tr>';
-    } else {
-      foreach ($slice as $r) {
-        echo '<tr>';
-        echo '<td>' . esc_html($r['_row_id']) . '</td>';
-        echo '<td><code>' . esc_html($r['job_id']) . '</code></td>';
-        echo '<td>' . esc_html($r['job_name']) . '</td>';
-        echo '<td>' . intval($r['_translated']) . '</td>';
-        foreach ($columnLangs as $lang) {
-          $ok = !empty($r['_langs'][$lang]['ok']);
-          echo '<td>' . ($ok ? '<span style="color:#0a0">✓</span>' : '<span style="color:#a00">–</span>') . '</td>';
-        }
-        $lu = $r['_updated_at'] ?? '';
-        // updated_at ist in GMT gespeichert (current_time('mysql', 1)); hübsch formatieren
-        $luDisp = $lu ? esc_html(get_date_from_gmt($lu, 'Y-m-d H:i:s')) : '–';
-        echo '<td>' . $luDisp . '</td>';
-        echo '</tr>';
-      }
-    }
-
-    echo '</tbody></table>';
-
-    // Pagination
-    if ($pages > 1) {
-      echo '<div class="tablenav"><div class="tablenav-pages">';
-      for ($i = 1; $i <= $pages; $i++) {
-        $url = add_query_arg([
-          'page'    => 'osct-jobs',
-          's'       => $s,
-          'lang'    => $filterL,
-          'orderby' => $orderby,
-          'order'   => $order,
-          'paged'   => $i
-        ], admin_url('admin.php'));
-        $cls = $i == $paged ? 'class="page-numbers current"' : 'class="page-numbers"';
-        echo '<a ' . $cls . ' href="' . esc_url($url) . '">' . $i . '</a> ';
-      }
-      echo '</div></div>';
-    }
-
-    echo '</div>';
-  }
+validate_patch () {
+	file="$1"
+	# Ensure that the patch applies without conflicts.
+	git am -3 "$file" || return
+	# TODO: Replace with appropriate checks for this patch
+	# (e.g. checkpatch.pl).
+	true
 }
 
-
-Datei: src\Admin\Pages\LogPage.php
-<?php
-namespace OSCT\Admin\Pages;
-use OSCT\Domain\Repos\LogRepo;
-
-if (!defined('ABSPATH')) exit;
-
-final class LogPage {
-    public function __construct(private LogRepo $repo) {}
-
-    public function render(): void {
-        $search = isset($_GET['s']) ? sanitize_text_field($_GET['s']) : '';
-        $from   = isset($_GET['from']) ? sanitize_text_field($_GET['from']) : '';
-        $to     = isset($_GET['to']) ? sanitize_text_field($_GET['to']) : '';
-        $paged  = isset($_GET['paged']) ? max(1, (int)$_GET['paged']) : 1;
-
-        if (isset($_GET['export']) && $_GET['export']==='csv') {
-            $csv = $this->repo->exportCsv(['search'=>$search,'from'=>$from,'to'=>$to]);
-            header('Content-Type: text/csv');
-            header('Content-Disposition: attachment; filename=osct-logs.csv');
-            echo $csv;
-            exit;
-        }
-
-        $data = $this->repo->list(['search'=>$search,'from'=>$from,'to'=>$to,'paged'=>$paged,'per_page'=>50]);
-        $sums = $this->repo->sums(['from'=>$from,'to'=>$to]);
-
-        echo '<div class="wrap"><h1>OS Content Translator – Logs</h1>';
-
-        echo '<form method="get" action="">';
-        echo '<input type="hidden" name="page" value="osct-logs">';
-        echo '<p>';
-        echo '<input type="text" name="s" value="'.esc_attr($search).'" placeholder="Post-ID oder Sprache" class="regular-text" style="max-width:220px">';
-        echo ' Von: <input type="date" name="from" value="'.esc_attr($from).'">';
-        echo ' Bis: <input type="date" name="to" value="'.esc_attr($to).'">';
-        echo ' <button class="button">Filtern</button>';
-        echo ' <a class="button" href="'.esc_url(add_query_arg(['page'=>'osct-logs'], admin_url('admin.php'))).'">Reset</a>';
-        echo ' <a class="button button-secondary" href="'.esc_url(add_query_arg(['page'=>'osct-logs','s'=>$search,'from'=>$from,'to'=>$to,'export'=>'csv'], admin_url('admin.php'))).'">CSV export</a>';
-        echo '</p>';
-        echo '</form>';
-
-        echo '<p><strong>Summen</strong>: Einträge '.(int)$sums['entries'].', Wörter '.(int)$sums['words'].', Zeichen '.(int)$sums['chars'].'</p>';
-
-        $last = $this->repo->lastRunJobSummary();
-        echo '<p><strong>Letzter Lauf – Stellenanzeigen:</strong> Übersetzt ' . (int)$last['entries'] . ' Einträge, Wörter ' . (int)$last['words'] . ', Zeichen ' . (int)$last['chars'] . '.</p>';
-
-        echo '<table class="widefat striped"><thead><tr>';
-        echo '<th>ID</th><th>Zeit</th><th>Post</th><th>Typ</th><th>Sprache</th><th>Provider</th><th>Aktion</th><th>Status</th><th>Wörter</th><th>Zeichen</th><th>Message</th>';
-        echo '</tr></thead><tbody>';
-
-        foreach ($data['rows'] as $r) {
-            $words = (int)$r['words_title'] + (int)$r['words_content'];
-            $chars = (int)$r['chars_title'] + (int)$r['chars_content'];
-            $postLink = get_edit_post_link((int)$r['post_id']);
-            echo '<tr>';
-            echo '<td>'.(int)$r['id'].'</td>';
-            echo '<td>'.esc_html( get_date_from_gmt($r['created_at'],'Y-m-d H:i:s') ).'</td>';
-            echo '<td>#'.(int)$r['post_id'].' '.($postLink?'<a href="'.esc_url($postLink).'" target="_blank">edit</a>':'').'</td>';
-            echo '<td>'.esc_html($r['post_type']).'</td>';
-            echo '<td>'.esc_html($r['source_lang']).' → '.esc_html($r['target_lang']).'</td>';
-            echo '<td>'.esc_html($r['provider']).'</td>';
-            echo '<td>'.esc_html($r['action']).'</td>';
-            echo '<td>'.esc_html($r['status']).'</td>';
-            echo '<td>'.$words.'</td>';
-            echo '<td>'.$chars.'</td>';
-            echo '<td>'.esc_html($r['message']).'</td>';
-            echo '</tr>';
-        }
-
-        echo '</tbody></table>';
-
-        $total = $data['total'];
-        $per   = $data['per_page'];
-        $pages = max(1, (int)ceil($total/$per));
-        if ($pages > 1) {
-            echo '<div class="tablenav"><div class="tablenav-pages">';
-            for ($i=1;$i<=$pages;$i++) {
-                $url = add_query_arg(['page'=>'osct-logs','s'=>$search,'from'=>$from,'to'=>$to,'paged'=>$i], admin_url('admin.php'));
-                $cls = $i==$data['paged'] ? 'class="page-numbers current"' : 'class="page-numbers"';
-                echo '<a '.$cls.' href="'.esc_url($url).'">'.$i.'</a> ';
-            }
-            echo '</div></div>';
-        }
-
-        echo '</div>';
-    }
+validate_series () {
+	# TODO: Replace with appropriate checks for the whole series
+	# (e.g. quick build, coding style checks, etc.).
+	true
 }
+
+# main -------------------------------------------------------------------------
+
+if test "$GIT_SENDEMAIL_FILE_COUNTER" = 1
+then
+	remote=$(git config --default origin --get sendemail.validateRemote) &&
+	ref=$(git config --default HEAD --get sendemail.validateRemoteRef) &&
+	worktree=$(mktemp --tmpdir -d sendemail-validate.XXXXXXX) &&
+	git worktree add -fd --checkout "$worktree" "refs/remotes/$remote/$ref" &&
+	git config --replace-all sendemail.validateWorktree "$worktree"
+else
+	worktree=$(git config --get sendemail.validateWorktree)
+fi || {
+	echo "sendemail-validate: error: failed to prepare worktree" >&2
+	exit 1
+}
+
+unset GIT_DIR GIT_WORK_TREE
+cd "$worktree" &&
+
+if grep -q "^diff --git " "$1"
+then
+	validate_patch "$1"
+else
+	validate_cover_letter "$1"
+fi &&
+
+if test "$GIT_SENDEMAIL_FILE_COUNTER" = "$GIT_SENDEMAIL_FILE_TOTAL"
+then
+	git config --unset-all sendemail.validateWorktree &&
+	trap 'git worktree remove -ff "$worktree"' EXIT &&
+	validate_series
+fi
 
