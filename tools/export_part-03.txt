@@ -1,0 +1,767 @@
+Datei: src\Domain\Repos\LogRepo.php
+<?php
+namespace OSCT\Domain\Repos;
+if (!defined('ABSPATH')) exit;
+
+final class LogRepo {
+    private function table(): string {
+        global $wpdb; return $wpdb->prefix . 'osct_translation_log';
+    }
+
+    public function insert(array $row): void {
+        global $wpdb;
+        $wpdb->insert($this->table(), [
+            'run_id'         => $row['run_id'],
+            'post_id'        => (int)$row['post_id'],
+            'post_type'      => $row['post_type'],
+            'source_lang'    => $row['source_lang'],
+            'target_lang'    => $row['target_lang'],
+            'provider'       => $row['provider'],
+            'action'         => $row['action'],
+            'status'         => $row['status'],
+            'words_title'    => (int)$row['words_title'],
+            'chars_title'    => (int)$row['chars_title'],
+            'words_content'  => (int)$row['words_content'],
+            'chars_content'  => (int)$row['chars_content'],
+            'src_hash'       => $row['src_hash'],
+            'message'        => $row['message'],
+            'created_at'     => current_time('mysql', 1),
+        ]);
+    }
+
+    public function list(array $args=[]): array {
+        global $wpdb;
+        $table = $this->table();
+        $where = '1=1';
+        $params = [];
+        if (!empty($args['search'])) {
+            $where .= ' AND (post_id = %d OR target_lang = %s)';
+            $params[] = (int)$args['search'];
+            $params[] = $args['search'];
+        }
+        if (!empty($args['from'])) {
+            $where .= ' AND created_at >= %s';
+            $params[] = $args['from'];
+        }
+        if (!empty($args['to'])) {
+            $where .= ' AND created_at <= %s';
+            $params[] = $args['to'];
+        }
+        $paged = max(1, (int)($args['paged'] ?? 1));
+        $pp    = max(1, (int)($args['per_page'] ?? 50));
+        $off   = ($paged-1)*$pp;
+
+        $sql = "SELECT SQL_CALC_FOUND_ROWS * FROM $table WHERE $where ORDER BY id DESC LIMIT %d OFFSET %d";
+        $params[] = $pp;
+        $params[] = $off;
+
+        $rows = $wpdb->get_results($wpdb->prepare($sql, $params), ARRAY_A);
+        $total = (int)$wpdb->get_var('SELECT FOUND_ROWS()');
+
+        return ['rows'=>$rows,'total'=>$total,'paged'=>$paged,'per_page'=>$pp];
+    }
+
+    public function sums(array $args=[]): array {
+        global $wpdb;
+        $table = $this->table();
+        $where = '1=1';
+        $params = [];
+        if (!empty($args['from'])) { $where.=' AND created_at >= %s'; $params[]=$args['from']; }
+        if (!empty($args['to']))   { $where.=' AND created_at <= %s'; $params[]=$args['to']; }
+        $sql = "SELECT
+            COUNT(*) as entries,
+            SUM(words_title+words_content) as words,
+            SUM(chars_title+chars_content) as chars
+            FROM $table WHERE $where";
+        $row = $wpdb->get_row($wpdb->prepare($sql,$params), ARRAY_A);
+        return [
+            'entries'=>(int)($row['entries'] ?? 0),
+            'words'  =>(int)($row['words'] ?? 0),
+            'chars'  =>(int)($row['chars'] ?? 0),
+        ];
+    }
+
+    public function exportCsv(array $args=[]): string {
+        $data = $this->list(array_merge($args,['per_page'=>100000,'paged'=>1]));
+        $rows = $data['rows'];
+        $fh = fopen('php://temp', 'w+');
+        fputcsv($fh, ['id','run_id','post_id','post_type','source_lang','target_lang','provider','action','status','words_title','chars_title','words_content','chars_content','src_hash','message','created_at']);
+        foreach ($rows as $r) fputcsv($fh, $r);
+        rewind($fh);
+        return stream_get_contents($fh);
+    }
+
+    public function lastRunId(): ?string
+    {
+        global $wpdb;
+        $table = $this->table();
+        $run = $wpdb->get_var("SELECT run_id FROM $table ORDER BY id DESC LIMIT 1");
+        return $run ?: null;
+    }
+
+    public function lastRunJobSummary(): array
+    {
+        global $wpdb;
+        $table = $this->table();
+        $runId = $this->lastRunId();
+        if (!$runId) return ['entries' => 0, 'words' => 0, 'chars' => 0];
+        $sql = "SELECT
+        COUNT(*) as entries,
+        SUM(words_title+words_content) as words,
+        SUM(chars_title+chars_content) as chars
+        FROM $table
+        WHERE run_id = %s AND post_type = 'job' AND action IN ('create','update')";
+        $row = $wpdb->get_row($wpdb->prepare($sql, $runId), ARRAY_A);
+        return [
+            'entries' => (int)($row['entries'] ?? 0),
+            'words'  => (int)($row['words'] ?? 0),
+            'chars'  => (int)($row['chars'] ?? 0),
+        ];
+    }
+}
+
+
+Datei: src\Domain\Repos\OptionRepo.php
+<?php
+namespace OSCT\Domain\Repos;
+if (!defined('ABSPATH')) exit;
+
+final class OptionRepo {
+    private string $key = 'osct_settings';
+
+    private array $defaults = [
+        'provider_default'    => 'google',
+        'provider_override'   => [],       // NEU: Map [lang => google|deepl]
+        'api_google'          => '',
+        'api_deepl'           => '',
+        'languages_active'    => [],
+        'menu_id'             => 0,
+        'page_whitelist'      => [],
+        'page_whitelist_extra'=> [],
+        'block_whitelist'     => [],
+        'slug_translate'      => 0,
+        'review_as_draft'     => 1,
+        'only_new'            => 0,        // optional (zukunft)
+    ];
+
+    public function all(): array {
+        $o = get_option($this->key, []);
+        if (!is_array($o)) $o = [];
+        return array_merge($this->defaults, $o);
+    }
+
+    public function get(string $k, $default=null) {
+        $a = $this->all();
+        return $a[$k] ?? $default;
+    }
+
+    public function updateAll(array $o): void {
+        update_option($this->key, array_merge($this->defaults, $o));
+    }
+}
+
+
+Datei: src\Features\Blocks\BlockSyncService.php
+<?php
+namespace OSCT\Features\Blocks;
+if (!defined('ABSPATH')) exit;
+
+final class BlockSyncService {
+    public function register(): void {
+        add_filter('render_block_data', [$this,'mapReusableBlockToLanguage'], 10, 2);
+    }
+    public function mapReusableBlockToLanguage(array $parsed_block, $source_post_id): array {
+        if (empty($parsed_block['blockName']) || $parsed_block['blockName'] !== 'core/block') return $parsed_block;
+        if (empty($parsed_block['attrs']['ref'])) return $parsed_block;
+        if (!function_exists('pll_get_post') || !function_exists('pll_current_language')) return $parsed_block;
+        $lang = pll_current_language('slug'); if (!$lang) return $parsed_block;
+        $tr = pll_get_post((int)$parsed_block['attrs']['ref'], $lang);
+        if ($tr) $parsed_block['attrs']['ref'] = (int)$tr;
+        return $parsed_block;
+    }
+}
+
+
+Datei: src\Features\Content\LinkRelinker.php
+<?php
+
+namespace OSCT\Features\Content;
+
+if (!defined('ABSPATH')) exit;
+
+final class LinkRelinker
+{
+  public function register(): void
+  {
+    error_log('innerlr');
+    add_filter('the_content', [$this, 'run'], 9);
+  }
+  public function run(string $html): string
+  {
+    error_log('innerlr0');
+    if (is_admin()) return $html;
+    error_log('innerlr1');
+    if (!function_exists('pll_current_language') || !function_exists('pll_get_post')) return $html;
+    $lang = pll_current_language('slug');
+    if (!$lang) return $html;
+
+    $siteHost = wp_parse_url(home_url(), PHP_URL_HOST);
+    libxml_use_internal_errors(true);
+    $dom = new \DOMDocument('1.0', 'UTF-8');
+    $dom->loadHTML('<meta http-equiv="Content-Type" content="text/html; charset=utf-8">' . $html);
+    $changed = false;
+
+    foreach ($dom->getElementsByTagName('a') as $a) {
+      $href = $a->getAttribute('href');
+      if (!$href) continue;
+      $p = wp_parse_url($href);
+      if (!empty($p['scheme']) && !in_array($p['scheme'], ['http', 'https'])) continue;
+      if (!empty($p['host']) && $p['host'] !== $siteHost) continue;
+      if (!empty($p['fragment'])) continue;
+
+      $abs = $href;
+      if (empty($p['host'])) {
+        $path = isset($p['path']) ? $p['path'] : '/';
+        $abs = home_url($path);
+        if (!empty($p['query'])) $abs .= '?' . $p['query'];
+      }
+
+      $postId = url_to_postid($abs);
+      if ($postId) {
+        $tr = pll_get_post($postId, $lang);
+        if ($tr) {
+          $a->setAttribute('href', get_permalink($tr));
+          $changed = true;
+        }
+      } else {
+        $homeAbs = trailingslashit(home_url('/'));
+        $absNorm = trailingslashit(preg_replace('~\?.*$~', '', $abs));
+        if ($absNorm === $homeAbs) {
+          $a->setAttribute('href', trailingslashit(pll_home_url($lang)));
+          $changed = true;
+        }
+      }
+    }
+
+    if (!$changed) return $html;
+    $body = $dom->getElementsByTagName('body')->item(0);
+    $out = '';
+    foreach ($body->childNodes as $child) $out .= $dom->saveHTML($child);
+    return $out;
+  }
+}
+
+
+Datei: src\Features\Menus\MenuSyncService.php
+<?php
+
+namespace OSCT\Features\Menus;
+
+use OSCT\Domain\Repos\OptionRepo;
+use OSCT\Domain\Repos\LanguageRepo;
+
+if (!defined('ABSPATH')) exit;
+
+final class MenuSyncService
+{
+  private array $debug = [];
+
+  public function __construct(private OptionRepo $opt, private LanguageRepo $langs) {}
+
+  public function bootstrap(): array
+  {
+    return $this->sync();
+  }
+
+  public function sync(): array
+  {
+    $srcMenuId = (int)$this->opt->get('menu_id', 0);
+    if (!$srcMenuId) return ['created' => 0, 'assigned' => 0, 'cloned_items' => 0, 'created_menus' => []];
+
+    $targets   = (array)$this->opt->get('languages_active', []);
+    $default   = $this->langs->default();
+    $srcMenu   = wp_get_nav_menu_object($srcMenuId);
+    if (!$srcMenu) return ['created' => 0, 'assigned' => 0, 'cloned_items' => 0, 'created_menus' => []];
+
+    $baseSlots = $this->slotsOf($srcMenuId);
+
+    $sumCreated = 0;
+    $sumAssigned = 0;
+    $sumItems = 0;
+    $createdMenus = [];
+
+    foreach ($targets as $lang) {
+      if ($lang === $default) continue;
+
+      $targetName = 'MainMenu (' . $lang . ')';
+      $dstMenuId = 0;
+
+      if (function_exists('pll_get_term')) {
+        $maybe = pll_get_term($srcMenuId, $lang);
+        if ($maybe && !is_wp_error($maybe)) $dstMenuId = (int)$maybe;
+      }
+
+      if (!$dstMenuId) {
+        $existing = wp_get_nav_menu_object($targetName);
+        if ($existing) {
+          $dstMenuId = (int)$existing->term_id;
+        } else {
+          $newId = wp_create_nav_menu($targetName);
+          if (is_wp_error($newId)) continue;
+          $dstMenuId = (int)$newId;
+          $sumCreated++;
+          $createdMenus[] = ['lang' => $lang, 'name' => $targetName];
+          if (function_exists('pll_set_term_language')) pll_set_term_language($dstMenuId, $lang);
+          if (function_exists('pll_get_term_translations') && function_exists('pll_save_term_translations')) {
+            $map = pll_get_term_translations($srcMenuId) ?: [];
+            $map[$default] = $srcMenuId;
+            $map[$lang] = $dstMenuId;
+            pll_save_term_translations($map);
+          }
+          $sumItems += $this->cloneItemsFlat($srcMenuId, $dstMenuId, $lang, $targetName);
+          #$sumItems += $this->cloneItemsWithParents($srcMenuId, $dstMenuId, $lang, $targetName);
+        }
+      }
+
+      if ($dstMenuId && $baseSlots) {
+        $this->assignSlots($lang, $dstMenuId, $baseSlots);
+        $sumAssigned++;
+      }
+    }
+
+    $summary = ['created' => $sumCreated, 'assigned' => $sumAssigned, 'cloned_items' => $sumItems, 'created_menus' => $createdMenus];
+    set_transient('osct_menu_debug', ['summary' => $summary, 'rows' => $this->debug], 600);
+    return $summary;
+  }
+
+  private function cloneItemsFlat(int $srcMenuId, int $dstMenuId, string $lang, string $dstName): int
+  {
+    $srcItems = wp_get_nav_menu_items($srcMenuId, ['update_post_term_cache' => false]) ?: [];
+    if (!$srcItems) return 0;
+
+    usort($srcItems, fn($a, $b) => ($a->menu_order ?? 0) <=> ($b->menu_order ?? 0));
+
+    $created = 0;
+
+    foreach ($srcItems as $it) {
+      $type   = get_post_meta($it->ID, '_menu_item_type', true) ?: (string)$it->type;
+      $object = get_post_meta($it->ID, '_menu_item_object', true) ?: (string)$it->object;
+      $objId  = (int)(get_post_meta($it->ID, '_menu_item_object_id', true) ?: (int)$it->object_id);
+      $url    = (string)(get_post_meta($it->ID, '_menu_item_url', true) ?: (string)$it->url);
+      $title  = (string)($it->title ?: $it->post_title ?: '');
+      if ($title === '' && $type === 'post_type' && $objId) $title = (string)(get_the_title($objId) ?: '');
+      if ($title === '' && $type === 'taxonomy' && $objId && $object) {
+        $t = get_term($objId, $object);
+        if ($t && !is_wp_error($t)) $title = (string)$t->name;
+      }
+      if ($title === '' && $type === 'custom') $title = $url ?: '#';
+
+      $args = [
+        'menu-item-status'    => 'publish',
+        'menu-item-position'  => (int)($it->menu_order ?? 0),
+        'menu-item-parent-id' => 0,
+        'menu-item-title'     => $title,
+      ];
+
+      if ($type === 'post_type') {
+        $args['menu-item-type'] = 'post_type';
+        $args['menu-item-object'] = $object ?: 'page';
+        // Übersetzte Objekt-ID holen falls vorhanden
+        if (function_exists('pll_get_post')) {
+          $translated_objId = pll_get_post($objId, $lang);
+          $args['menu-item-object-id'] = $translated_objId ?: $objId;
+        } else {
+          $args['menu-item-object-id'] = $objId;
+        }
+      } elseif ($type === 'taxonomy') {
+        $args['menu-item-type'] = 'taxonomy';
+        $args['menu-item-object'] = $object ?: 'category';
+        $args['menu-item-object-id'] = $objId;
+      } elseif ($type === 'post_type_archive') {
+        $args['menu-item-type'] = 'post_type_archive';
+        $args['menu-item-object'] = $object ?: 'post';
+      } else {
+        $args['menu-item-type'] = 'custom';
+        $args['menu-item-url']  = $url ?: '#';
+      }
+
+      $newId = wp_update_nav_menu_item($dstMenuId, 0, $args);
+      if (!is_wp_error($newId)) {
+        $created++;
+      }
+    }
+
+    return $created;
+  }
+
+  private function cloneItemsWithParents(int $srcMenuId, int $dstMenuId, string $lang, string $dstName): int
+  {
+    $srcItems = wp_get_nav_menu_items($srcMenuId, ['update_post_term_cache' => false]) ?: [];
+    if (!$srcItems) return 0;
+    usort($srcItems, fn($a, $b) => ($a->menu_order ?? 0) <=> ($b->menu_order ?? 0));
+
+    $map = [];
+    $created = 0;
+
+    foreach ($srcItems as $it) {
+      $type   = get_post_meta($it->ID, '_menu_item_type', true) ?: (string)$it->type;
+      $object = get_post_meta($it->ID, '_menu_item_object', true) ?: (string)$it->object;
+      $objId  = (int)(get_post_meta($it->ID, '_menu_item_object_id', true) ?: (int)$it->object_id);
+      $url    = (string)(get_post_meta($it->ID, '_menu_item_url', true) ?: (string)$it->url);
+      $title  = (string)($it->title ?: $it->post_title ?: '');
+      if ($title === '' && $type === 'post_type' && $objId) $title = (string)(get_the_title($objId) ?: '');
+      if ($title === '' && $type === 'taxonomy' && $objId && $object) {
+        $t = get_term($objId, $object);
+        if ($t && !is_wp_error($t)) $title = (string)$t->name;
+      }
+      if ($title === '' && $type === 'custom') $title = $url ?: '#';
+
+      $args = [
+        'menu-item-status'    => 'publish',
+        'menu-item-position'  => (int)($it->menu_order ?? 0),
+        'menu-item-parent-id' => 0,
+        'menu-item-title'     => $title,
+      ];
+
+      if ($type === 'post_type') {
+        $args['menu-item-type'] = 'post_type';
+        $args['menu-item-object'] = $object ?: 'page';
+        $args['menu-item-object-id'] = $objId;
+      } elseif ($type === 'taxonomy') {
+        $args['menu-item-type'] = 'taxonomy';
+        $args['menu-item-object'] = $object ?: 'category';
+        $args['menu-item-object-id'] = $objId;
+      } elseif ($type === 'post_type_archive') {
+        $args['menu-item-type'] = 'post_type_archive';
+        $args['menu-item-object'] = $object ?: 'post';
+      } else {
+        $args['menu-item-type'] = 'custom';
+        $args['menu-item-url']  = $url ?: '#';
+      }
+
+      $newId = wp_update_nav_menu_item($dstMenuId, 0, $args);
+      if (!is_wp_error($newId)) {
+        $map[(int)$it->ID] = (int)$newId;
+        $created++;
+        $meta = get_post_meta($it->ID);
+        foreach ($meta as $key => $values) {
+          if (strpos($key, '_menu_item_') === 0) {
+            update_post_meta($newId, $key, maybe_unserialize($values[0]));
+          }
+        }
+      }
+    }
+
+    foreach ($srcItems as $it) {
+      $srcId = (int)$it->ID;
+      if (empty($map[$srcId])) continue;
+      $parentSrcMeta = (int)get_post_meta($srcId, '_menu_item_menu_item_parent', true);
+      $parentSrcProp = (int)($it->menu_item_parent ?? 0);
+      $parentSrc = $parentSrcMeta ?: $parentSrcProp;
+      $parentDst = $parentSrc && !empty($map[$parentSrc]) ? (int)$map[$parentSrc] : 0;
+
+      $upd = wp_update_nav_menu_item($dstMenuId, (int)$map[$srcId], [
+        'menu-item-parent-id' => $parentDst,
+        'menu-item-position'  => (int)($it->menu_order ?? 0),
+        'menu-item-status'    => 'publish',
+      ]);
+    }
+
+    return $created;
+  }
+
+  private function slotsOf(int $menuId): array
+  {
+    $loc = get_theme_mod('nav_menu_locations', []);
+    $out = [];
+    foreach ($loc as $slot => $mid) if ((int)$mid === (int)$menuId) $out[] = $slot;
+    return $out;
+  }
+
+  private function assignSlots(string $lang, int $menuId, array $slots): void
+  {
+    $restore = null;
+    if (function_exists('pll_current_language') && function_exists('pll_switch_language')) {
+      $restore = pll_current_language('slug');
+      pll_switch_language($lang);
+    }
+    $loc = get_theme_mod('nav_menu_locations', []);
+    if (!is_array($loc)) $loc = [];
+    foreach ($slots as $slot) $loc[$slot] = $menuId;
+    set_theme_mod('nav_menu_locations', $loc);
+    if ($restore && function_exists('pll_switch_language')) pll_switch_language($restore);
+  }
+}
+
+
+Datei: src\Translation\HashService.php
+<?php
+namespace OSCT\Translation;
+if (!defined('ABSPATH')) exit;
+
+final class HashService {
+    public function srcHash(int $post_id): string {
+        $p = get_post($post_id);
+        $title = get_the_title($post_id);
+        $content = $p ? $p->post_content : '';
+        return md5($title.'|'.$content);
+    }
+    public function setTargetHash(int $post_id, string $lang, string $hash): void {
+        update_post_meta($post_id,'_osct_tr_'.$lang.'_hash',$hash);
+        update_post_meta($post_id,'_osct_tr_'.$lang.'_updated',time());
+    }
+    public function getTargetHash(int $post_id, string $lang): string {
+        return (string) get_post_meta($post_id,'_osct_tr_'.$lang.'_hash',true);
+    }
+}
+
+
+Datei: src\Translation\Jobs\Helpers.php
+<?php
+
+namespace OSCT\Translation\Jobs;
+
+if (!defined('ABSPATH')) exit;
+
+final class Helpers
+{
+  /** Hash aus Name + relevanten Feldern (stabil, DB-freundlich) */
+  public static function srcHash(string $name, array $val): string
+  {
+    $pick = [
+      'name' => $name,
+      'Bezeichnung' => $val['Bezeichnung'] ?? '',
+      'BezeichnungAusschreibung' => $val['BezeichnungAusschreibung'] ?? '',
+      'Arbeitgeberleistung' => $val['Arbeitgeberleistung'] ?? '',
+      'Aufgaben' => $val['Aufgaben'] ?? '',
+      'FachlicheAnforderungen' => $val['FachlicheAnforderungen'] ?? '',
+      'KontaktText' => $val['KontaktText'] ?? '',
+      'MetaDescription' => $val['MetaDescription'] ?? '',
+      'LinkSlug' => $val['LinkSlug'] ?? '',
+      'EinsatzortPlz' => $val['EinsatzortPlz'] ?? '',
+      'EinsatzortOrt' => $val['EinsatzortOrt'] ?? '',
+    ];
+    return sha1(wp_json_encode($pick));
+  }
+
+  /** Wörter im sichtbaren Text (HTML entfernt) */
+  public static function countWords(string $html): int
+  {
+    $text = html_entity_decode(wp_strip_all_tags($html), ENT_QUOTES, get_bloginfo('charset'));
+    $text = preg_replace('/[\pZ\pC]+/u', ' ', $text);
+    $arr  = preg_split('/\s+/u', trim($text));
+    return $text === '' ? 0 : count($arr);
+  }
+
+  /** Zeichen im sichtbaren Text */
+  public static function countChars(string $html): int
+  {
+    $text = html_entity_decode(wp_strip_all_tags($html), ENT_QUOTES, get_bloginfo('charset'));
+    return mb_strlen($text);
+  }
+
+  /** Metriken für Titel + ausgewählte Inhaltsfelder */
+  public static function countAll(string $title, array $val): array
+  {
+    $wt = self::countWords($title);
+    $ct = self::countChars($title);
+    $fields = ['Arbeitgeberleistung', 'Aufgaben', 'FachlicheAnforderungen', 'KontaktText', 'BezeichnungAusschreibung'];
+    $buf = '';
+    foreach ($fields as $f) if (!empty($val[$f]) && is_string($val[$f])) $buf .= ' ' . $val[$f];
+    $wc = self::countWords($buf);
+    $cc = self::countChars($buf);
+    return ['wt' => $wt, 'ct' => $ct, 'wc' => $wc, 'cc' => $cc];
+  }
+
+  /** Shortcodes maskieren, damit Provider kein Markup zerstören */
+  public static function protectShortcodes(string $content): array
+  {
+    if (!function_exists('get_shortcode_regex')) return [$content, []];
+    $regex = get_shortcode_regex();
+    $map = [];
+    $i = 0;
+    $masked = preg_replace_callback('/' . $regex . '/s', function ($m) use (&$map, &$i) {
+      $key = '__OSCT_SC_' . $i . '__';
+      $map[$key] = $m[0];
+      $i++;
+      return $key;
+    }, $content);
+    return [$masked, $map];
+  }
+
+  public static function restoreShortcodes(string $content, array $map): string
+  {
+    if (empty($map)) return $content;
+    return strtr($content, $map);
+  }
+
+  /** Links im HTML umschreiben (Slug + Sprachhome) */
+  public static function rewriteLinks(string $html, string $oldSlug, string $newSlug, string $lang): string
+  {
+    $out = str_replace($oldSlug, $newSlug, $html);
+    $home = trailingslashit(home_url());
+    if (function_exists('pll_home_url')) {
+      $langHome = trailingslashit(pll_home_url($lang));
+      $out = str_replace($home, $langHome, $out);
+    }
+    return $out;
+  }
+
+  /** Eine einzelne URL umschreiben */
+  public static function rewriteUrl(string $url, string $oldSlug, string $newSlug, string $lang): string
+  {
+    $u = str_replace($oldSlug, $newSlug, $url);
+    $home = trailingslashit(home_url());
+    if (function_exists('pll_home_url')) {
+      $langHome = trailingslashit(pll_home_url($lang));
+      if (str_starts_with($u, $home)) $u = $langHome . substr($u, strlen($home));
+    }
+    return $u;
+  }
+
+  /** ISO / RFC-Zeit robust nach MySQL-Datetime */
+  public static function toMysqlDate(?string $s): ?string
+  {
+    if (!$s) return null;
+    $norm = preg_replace('/\.\d+Z$/', 'Z', trim($s));
+    try {
+      $dt = new \DateTime($norm);
+    } catch (\Exception $e) {
+      return null;
+    }
+    return $dt->format('Y-m-d H:i:s');
+  }
+
+  /** „created_at“ aus Zeilen-/Wert-Feldern ermitteln */
+  public static function pickCreatedAt(array $row, array $val): string
+  {
+    $d = self::toMysqlDate(is_string($row['created_at'] ?? null) ? $row['created_at'] : null);
+    if ($d) return $d;
+
+    $d = self::toMysqlDate($val['VeroeffentlichtAb'] ?? null);
+    if ($d) return $d;
+
+    $d = self::toMysqlDate($val['DatumAb'] ?? null);
+    if ($d) return $d;
+
+    if (!empty($val['JsonLd']) && is_string($val['JsonLd'])) {
+      $j = json_decode($val['JsonLd'], true);
+      if (is_array($j) && !empty($j['datePosted'])) {
+        $d = self::toMysqlDate($j['datePosted']);
+        if ($d) return $d;
+      }
+    }
+
+    return current_time('mysql', 1);
+  }
+}
+
+
+Datei: src\Translation\Jobs\JobLogger.php
+<?php
+
+namespace OSCT\Translation\Jobs;
+
+use OSCT\Domain\Repos\LogRepo;
+
+if (!defined('ABSPATH')) exit;
+
+final class JobsLogger
+{
+  public function __construct(
+    private LogRepo $logs,
+    private string $runId,
+    private string $sourceLang
+  ) {}
+
+  private function rid(): string
+  {
+    return $this->runId ?: wp_generate_uuid4();
+  }
+
+  public function batch(array $pickedIds, ?int $limit): void
+  {
+    $this->logs->insert([
+      'run_id'        => $this->rid(),
+      'post_id'       => 0,
+      'post_type'     => 'job',
+      'source_lang'   => $this->sourceLang,
+      'target_lang'   => '-',
+      'provider'      => 'mixed',
+      'action'        => 'batch',
+      'status'        => 'info',
+      'words_title'   => 0,
+      'chars_title'   => 0,
+      'words_content' => 0,
+      'chars_content' => 0,
+      'src_hash'      => '',
+      'message'       => sprintf(
+        'Picked %d jobs%s: %s',
+        count($pickedIds),
+        $limit !== null ? " (limit={$limit})" : '',
+        implode(',', array_slice($pickedIds, 0, 50))
+      ),
+    ]);
+  }
+
+  public function beginJob(string $jobId, string $srcHash, array $mSrc): void
+  {
+    $this->logs->insert([
+      'run_id'        => $this->rid(),
+      'post_id'       => 0,
+      'post_type'     => 'job',
+      'source_lang'   => $this->sourceLang,
+      'target_lang'   => '-',
+      'provider'      => 'mixed',
+      'action'        => 'begin',
+      'status'        => 'info',
+      'words_title'   => (int)$mSrc['wt'],
+      'chars_title'   => (int)$mSrc['ct'],
+      'words_content' => (int)$mSrc['wc'],
+      'chars_content' => (int)$mSrc['cc'],
+      'src_hash'      => $srcHash,
+      'message'       => 'job_id=' . $jobId,
+    ]);
+  }
+
+  public function result(string $jobId, string $target, string $action, string $status, array $m, string $srcHash): void
+  {
+    $this->logs->insert([
+      'run_id'        => $this->rid(),
+      'post_id'       => 0,
+      'post_type'     => 'job',
+      'source_lang'   => $this->sourceLang,
+      'target_lang'   => $target,
+      'provider'      => 'mixed',
+      'action'        => $action,
+      'status'        => $status,
+      'words_title'   => (int)$m['wt'],
+      'chars_title'   => (int)$m['ct'],
+      'words_content' => (int)$m['wc'],
+      'chars_content' => (int)$m['cc'],
+      'src_hash'      => $srcHash,
+      'message'       => ucfirst($action) . '; job_id=' . $jobId,
+    ]);
+  }
+
+  public function error(string $jobId, string $message): void
+  {
+    $this->logs->insert([
+      'run_id'        => $this->rid(),
+      'post_id'       => 0,
+      'post_type'     => 'job',
+      'source_lang'   => $this->sourceLang,
+      'target_lang'   => '-',
+      'provider'      => 'mixed',
+      'action'        => 'error',
+      'status'        => 'error',
+      'words_title'   => 0,
+      'chars_title'   => 0,
+      'words_content' => 0,
+      'chars_content' => 0,
+      'src_hash'      => '',
+      'message'       => 'job_id=' . $jobId . '; ' . $message,
+    ]);
+  }
+}
+

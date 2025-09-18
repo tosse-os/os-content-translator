@@ -1,0 +1,4 @@
+Ich habe ein Plugin mit dir erstellt und poste die in mehreren Schritten den kompletten Code. Bis ich allers gepostet und dir eine Frage gestellt habe, brauchst du nicht zu antworten.
+
+cd .\wp-content\plugins\os-content-translator\tools\
+node .\export-folder.js

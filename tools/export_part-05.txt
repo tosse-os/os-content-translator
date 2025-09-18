@@ -1,0 +1,714 @@
+Datei: src\Translation\JobsTranslator_OLD.php
+<?php
+
+namespace OSCT\Translation;
+
+use OSCT\Domain\Repos\OptionRepo;
+use OSCT\Domain\Repos\LanguageRepo;
+use OSCT\Domain\Repos\JobsRepo;
+use OSCT\Domain\Repos\LogRepo;
+
+if (!defined('ABSPATH')) exit;
+
+final class JobsTranslator
+{
+  private JobsRepo $repo;
+  /** @var callable(string $text, string $target, string $source): string */
+  private $translator;
+  private string $runId = '';
+  private bool $force = false;
+  private ?string $onlyJobId = null;
+  private ?int $limit = null;
+
+  public function __construct(
+    private OptionRepo $opt,
+    private LanguageRepo $langs,
+    private LogRepo $logs
+  ) {
+    $this->repo = new JobsRepo();
+    $this->translator = fn(string $t, string $l, string $s) => $t;
+  }
+
+  private function runId(): string
+  {
+    if ($this->runId === '') $this->runId = wp_generate_uuid4();
+    return $this->runId;
+  }
+
+  public function setTranslator(callable $fn): void
+  {
+    $this->translator = $fn;
+  }
+  public function setRunId(string $id): void
+  {
+    if ($id) $this->runId = $id;
+  }
+  public function setForce(bool $on): void
+  {
+    $this->force = $on;
+  }
+  public function setOnlyJobId(?string $id): void
+  {
+    $this->onlyJobId = $id ? trim($id) : null;
+  }
+  public function setLimit(?int $n): void
+  {
+    $this->limit = $n ? max(1, (int)$n) : null;
+  }
+
+  public function translateAll(): array
+  {
+    $this->runId(); // sicherstellen, dass eine einheitliche run_id existiert
+
+    $source      = $this->langs->default();
+    $targetsAll  = (array)$this->opt->get('languages_active', []);
+    $targets     = array_values(array_filter($targetsAll, fn($l) => $l !== $source));
+
+    // Ohne Zielsprachen: sichtbar loggen und sauber aussteigen
+    if (empty($targets)) {
+      $this->logs->insert([
+        'run_id'        => $this->runId(),
+        'post_id'       => 0,
+        'post_type'     => 'job',
+        'source_lang'   => $source,
+        'target_lang'   => '-',
+        'provider'      => 'mixed',
+        'action'        => 'no_targets',
+        'status'        => 'info',
+        'words_title'   => 0,
+        'chars_title'   => 0,
+        'words_content' => 0,
+        'chars_content' => 0,
+        'src_hash'      => '',
+        'message'       => 'No target languages active (languages_active=' . implode(',', $targetsAll) . ')',
+      ]);
+      return ['created' => 0, 'skipped' => 0, 'words' => 0, 'chars' => 0];
+    }
+
+    // Quelljobs
+    $rows = $this->repo->all();
+    if ($this->onlyJobId) {
+      $rows = array_values(array_filter($rows, fn($r) => (string)$r['job_id'] === $this->onlyJobId));
+    }
+
+    // deterministisch
+    usort($rows, fn($a, $b) => strnatcmp((string)$a['job_id'], (string)$b['job_id']));
+    $limited = $this->limit !== null ? array_slice($rows, 0, $this->limit) : $rows;
+
+    // Batch-Metriken (Summe aller ausgewählten Jobs)
+    $sumWt = $sumCt = $sumWc = $sumCc = 0;
+    foreach ($limited as $r) {
+      $nameSrc = (string)$r['job_name'];
+      $val     = maybe_unserialize($r['job_value']);
+      if (!is_array($val)) $val = [];
+      $m = $this->countAll($nameSrc, $val);
+      $sumWt += $m['wt'];
+      $sumCt += $m['ct'];
+      $sumWc += $m['wc'];
+      $sumCc += $m['cc'];
+    }
+
+    // Batch-Zeile
+    $pickedIds = array_map(fn($r) => (string)$r['job_id'], $limited);
+    $this->logs->insert([
+      'run_id'        => $this->runId(),
+      'post_id'       => 0,
+      'post_type'     => 'job',
+      'source_lang'   => $source,
+      'target_lang'   => implode(',', $targets), // hier sichtbar machen
+      'provider'      => 'mixed',
+      'action'        => 'batch',
+      'status'        => 'info',
+      'words_title'   => $sumWt,
+      'chars_title'   => $sumCt,
+      'words_content' => $sumWc,
+      'chars_content' => $sumCc,
+      'src_hash'      => '',
+      'message'       => sprintf(
+        'Picked %d jobs%s: %s; targets=%s',
+        count($limited),
+        $this->limit !== null ? " (limit={$this->limit})" : '',
+        implode(',', array_slice($pickedIds, 0, 100)),
+        implode(',', $targets)
+      ),
+    ]);
+
+    $created = 0;
+    $skipped = 0;
+    $words = 0;
+    $chars = 0;
+
+    $fieldsPlain = [
+      'Bezeichnung',
+      'BezeichnungAusschreibung',
+      'MetaDescription',
+      'ArbeitgeberleistungHeader',
+      'AufgabenHeader',
+      'FachlicheAnforderungenHeader',
+      'KontaktTextHeader',
+      'StellenzielHeader',
+      'PersoenlicheAnforderungenHeader',
+      'PerspektivenHeader',
+      'UnternehmensbedeutungHeader',
+      'ArbeitgebervorstellungHeader'
+    ];
+    $fieldsHtml  = ['Arbeitgeberleistung', 'Aufgaben', 'FachlicheAnforderungen', 'KontaktText'];
+
+    foreach ($limited as $r) {
+      $jobId   = (string)$r['job_id'];
+      $nameSrc = (string)$r['job_name'];
+      $val     = maybe_unserialize($r['job_value']);
+      if (!is_array($val)) $val = [];
+      $srcHash = $this->srcHash($nameSrc, $val);
+
+      // BEGIN pro Job
+      $mSrc = $this->countAll($nameSrc, $val);
+      $this->logs->insert([
+        'run_id'        => $this->runId(),
+        'post_id'       => 0,
+        'post_type'     => 'job',
+        'source_lang'   => $source,
+        'target_lang'   => implode(',', $targets),
+        'provider'      => 'mixed',
+        'action'        => 'begin',
+        'status'        => 'info',
+        'words_title'   => $mSrc['wt'],
+        'chars_title'   => $mSrc['ct'],
+        'words_content' => $mSrc['wc'],
+        'chars_content' => $mSrc['cc'],
+        'src_hash'      => $srcHash,
+        'message'       => sprintf('[job %s] begin; title="%s"', $jobId, mb_substr($nameSrc, 0, 180)),
+      ]);
+
+      foreach ($targets as $lang) {
+        // existierende Übersetzung?
+        $existing    = $this->repo->getTranslation($jobId, $lang);
+        $stateBefore = $existing && !empty($existing['src_hash']) && $existing['src_hash'] === $srcHash ? 'ok' : 'stale';
+
+        if ($existing && $stateBefore === 'ok' && !$this->force) {
+          $mm = $this->countAll($nameSrc, $val);
+          $this->logs->insert([
+            'run_id'        => $this->runId(),
+            'post_id'       => 0,
+            'post_type'     => 'job',
+            'source_lang'   => $source,
+            'target_lang'   => $lang,
+            'provider'      => 'mixed',
+            'action'        => 'skip',
+            'status'        => 'ok',
+            'words_title'   => $mm['wt'],
+            'chars_title'   => $mm['ct'],
+            'words_content' => $mm['wc'],
+            'chars_content' => $mm['cc'],
+            'src_hash'      => $srcHash,
+            'message'       => "[job {$jobId}] OK (no changes)",
+          ]);
+          $skipped++;
+          continue;
+        }
+
+        // Übersetzen
+        $valTr  = $val;
+        $nameTr = $this->t($nameSrc, $lang, $source);
+
+        foreach ($fieldsPlain as $k) {
+          if (isset($val[$k]) && is_string($val[$k])) {
+            $tr = $this->t($val[$k], $lang, $source);
+            $valTr[$k] = $tr !== '' ? $tr : $val[$k];
+          }
+        }
+        foreach ($fieldsHtml as $k) {
+          if (isset($val[$k]) && is_string($val[$k])) {
+            [$masked, $map] = $this->protectShortcodes($val[$k]);
+            $trRaw = $this->t($masked, $lang, $source);
+            $tr    = $trRaw !== '' ? $trRaw : $val[$k];
+            $valTr[$k] = $this->restoreShortcodes($tr, $map);
+          }
+        }
+        if (isset($valTr['MetaDescription']) && is_string($valTr['MetaDescription'])) {
+          $valTr['MetaDescription'] = mb_substr($valTr['MetaDescription'], 0, 170);
+        }
+
+        // Slug
+        $oldSlug   = isset($val['LinkSlug']) && is_string($val['LinkSlug']) ? $val['LinkSlug'] : sanitize_title($nameSrc);
+        $plz       = isset($val['EinsatzortPlz']) ? (string)$val['EinsatzortPlz'] : '';
+        $ort       = isset($val['EinsatzortOrt']) ? (string)$val['EinsatzortOrt'] : '';
+        $baseTitle = $nameTr !== '' ? $nameTr : $nameSrc;
+        $newSlug   = sanitize_title($baseTitle . ($plz !== '' ? '-' . $plz : '') . ($ort !== '' ? '-' . $ort : ''));
+        $valTr['LinkSlug'] = $newSlug;
+
+        foreach (array_merge($fieldsHtml, $fieldsPlain) as $k) {
+          if (isset($valTr[$k]) && is_string($valTr[$k])) {
+            $valTr[$k] = $this->rewriteLinks($valTr[$k], $oldSlug, $newSlug, $lang);
+          }
+        }
+        if (!empty($val['JsonLd']) && is_string($val['JsonLd'])) {
+          $j = json_decode($val['JsonLd'], true);
+          if (is_array($j)) {
+            if ($baseTitle !== '') $j['title'] = $baseTitle;
+            if (isset($j['url'])) $j['url'] = $this->rewriteUrl((string)$j['url'], $oldSlug, $newSlug, $lang);
+            $valTr['JsonLd'] = wp_json_encode($j, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+          } else {
+            $valTr['JsonLd'] = $this->rewriteLinks($val['JsonLd'], $oldSlug, $newSlug, $lang);
+          }
+        }
+
+        // Speichern
+        $createdAt = $this->pickCreatedAt($r, $val);
+        $this->repo->upsert($jobId, $lang, $baseTitle, $valTr, $newSlug, $srcHash, $createdAt);
+
+        // Metriken + Log
+        $mm = $this->countAll($baseTitle, $valTr);
+        $words += $mm['wt'] + $mm['wc'];
+        $chars += $mm['ct'] + $mm['cc'];
+        $action = $existing ? 'update' : 'create';
+
+        $this->logs->insert([
+          'run_id'        => $this->runId(),
+          'post_id'       => 0,
+          'post_type'     => 'job',
+          'source_lang'   => $source,
+          'target_lang'   => $lang,
+          'provider'      => 'mixed',
+          'action'        => $action,
+          'status'        => 'ok',
+          'words_title'   => $mm['wt'],
+          'chars_title'   => $mm['ct'],
+          'words_content' => $mm['wc'],
+          'chars_content' => $mm['cc'],
+          'src_hash'      => $srcHash,
+          'message'       => "[job {$jobId}] " . ucfirst($action),
+        ]);
+
+        if (!$existing) $created++;
+      }
+
+      // optionales END pro Job (rein informativ)
+      $this->logs->insert([
+        'run_id'        => $this->runId(),
+        'post_id'       => 0,
+        'post_type'     => 'job',
+        'source_lang'   => $source,
+        'target_lang'   => implode(',', $targets),
+        'provider'      => 'mixed',
+        'action'        => 'end',
+        'status'        => 'info',
+        'words_title'   => 0,
+        'chars_title'   => 0,
+        'words_content' => 0,
+        'chars_content' => 0,
+        'src_hash'      => $srcHash,
+        'message'       => "[job {$jobId}] end",
+      ]);
+    }
+
+    return ['created' => $created, 'skipped' => $skipped, 'words' => $words, 'chars' => $chars];
+  }
+
+  private function t(string $text, string $lang, string $source): string
+  {
+    return call_user_func($this->translator, $text, $lang, $source);
+  }
+
+  private function srcHash(string $name, array $val): string
+  {
+    $pick = [
+      'name' => $name,
+      'Bezeichnung' => $val['Bezeichnung'] ?? '',
+      'BezeichnungAusschreibung' => $val['BezeichnungAusschreibung'] ?? '',
+      'Arbeitgeberleistung' => $val['Arbeitgeberleistung'] ?? '',
+      'Aufgaben' => $val['Aufgaben'] ?? '',
+      'FachlicheAnforderungen' => $val['FachlicheAnforderungen'] ?? '',
+      'KontaktText' => $val['KontaktText'] ?? '',
+      'MetaDescription' => $val['MetaDescription'] ?? '',
+      'LinkSlug' => $val['LinkSlug'] ?? '',
+      'EinsatzortPlz' => $val['EinsatzortPlz'] ?? '',
+      'EinsatzortOrt' => $val['EinsatzortOrt'] ?? '',
+    ];
+    return sha1(wp_json_encode($pick));
+  }
+
+  private function protectShortcodes(string $content): array
+  {
+    if (!function_exists('get_shortcode_regex')) return [$content, []];
+    $regex = get_shortcode_regex();
+    $map = [];
+    $i = 0;
+    $masked = preg_replace_callback('/' . $regex . '/s', function ($m) use (&$map, &$i) {
+      $key = '__OSCT_SC_' . $i . '__';
+      $map[$key] = $m[0];
+      $i++;
+      return $key;
+    }, $content);
+    return [$masked, $map];
+  }
+
+  private function restoreShortcodes(string $content, array $map): string
+  {
+    if (empty($map)) return $content;
+    return strtr($content, $map);
+  }
+
+  private function rewriteLinks(string $html, string $oldSlug, string $newSlug, string $lang): string
+  {
+    $out = str_replace($oldSlug, $newSlug, $html);
+    $home = trailingslashit(home_url());
+    if (function_exists('pll_home_url')) {
+      $langHome = trailingslashit(pll_home_url($lang));
+      $out = str_replace($home, $langHome, $out);
+    }
+    return $out;
+  }
+
+  private function rewriteUrl(string $url, string $oldSlug, string $newSlug, string $lang): string
+  {
+    $u = str_replace($oldSlug, $newSlug, $url);
+    $home = trailingslashit(home_url());
+    if (function_exists('pll_home_url')) {
+      $langHome = trailingslashit(pll_home_url($lang));
+      if (str_starts_with($u, $home)) $u = $langHome . substr($u, strlen($home));
+    }
+    return $u;
+  }
+
+  private function countWords(string $html): int
+  {
+    $text = html_entity_decode(wp_strip_all_tags($html), ENT_QUOTES, get_bloginfo('charset'));
+    $text = preg_replace('/[\pZ\pC]+/u', ' ', $text);
+    $arr = preg_split('/\s+/u', trim($text));
+    return $text === '' ? 0 : count($arr);
+  }
+
+  private function countChars(string $html): int
+  {
+    $text = html_entity_decode(wp_strip_all_tags($html), ENT_QUOTES, get_bloginfo('charset'));
+    return mb_strlen($text);
+  }
+
+  private function countAll(string $title, array $val): array
+  {
+    $wt = $this->countWords($title);
+    $ct = $this->countChars($title);
+    $fields = ['Arbeitgeberleistung', 'Aufgaben', 'FachlicheAnforderungen', 'KontaktText', 'BezeichnungAusschreibung'];
+    $buf = '';
+    foreach ($fields as $f) if (!empty($val[$f]) && is_string($val[$f])) $buf .= ' ' . $val[$f];
+    $wc = $this->countWords($buf);
+    $cc = $this->countChars($buf);
+    return ['wt' => $wt, 'ct' => $ct, 'wc' => $wc, 'cc' => $cc];
+  }
+
+  private function toMysqlDate(?string $s): ?string
+  {
+    if (!$s) return null;
+    $norm = preg_replace('/\.\d+Z$/', 'Z', trim($s));
+    try {
+      $dt = new \DateTime($norm);
+    } catch (\Exception $e) {
+      return null;
+    }
+    return $dt->format('Y-m-d H:i:s');
+  }
+
+  private function pickCreatedAt(array $row, array $val): string
+  {
+    $c = $row['created_at'] ?? null;
+    $d = $this->toMysqlDate(is_string($c) ? $c : null);
+    if ($d) return $d;
+    $d = $this->toMysqlDate($val['VeroeffentlichtAb'] ?? null);
+    if ($d) return $d;
+    $d = $this->toMysqlDate($val['DatumAb'] ?? null);
+    if ($d) return $d;
+    if (!empty($val['JsonLd']) && is_string($val['JsonLd'])) {
+      $j = json_decode($val['JsonLd'], true);
+      if (is_array($j) && !empty($j['datePosted'])) {
+        $d = $this->toMysqlDate($j['datePosted']);
+        if ($d) return $d;
+      }
+    }
+    return current_time('mysql', 1);
+  }
+}
+
+
+Datei: src\Translation\Providers\DeepLProvider.php
+<?php
+
+namespace OSCT\Translation\Providers;
+
+use OSCT\Domain\Repos\OptionRepo;
+
+if (!defined('ABSPATH')) exit;
+
+final class DeepLProvider implements ProviderInterface
+{
+    public function __construct(private OptionRepo $opt) {}
+
+    public function name(): string
+    {
+        return 'deepl';
+    }
+
+    public function valid(): bool
+    {
+        $key = trim((string)$this->opt->get('api_deepl', ''));
+        return $key !== '';
+    }
+
+    public function translate(string $text, string $target, string $source): string
+    {
+        $key = trim((string)$this->opt->get('api_deepl', ''));
+        if ($key === '' || $text === '') return '';
+
+        $endpoint = str_ends_with($key, ':fx') ? 'https://api-free.deepl.com/v2/translate'
+            : 'https://api.deepl.com/v2/translate';
+
+        $tgt = LangMap::deeplTarget($target);
+        $src = LangMap::deeplSource($source);
+
+        $resp = wp_remote_post($endpoint, [
+            'timeout' => 25,
+            'headers' => ['Authorization' => 'DeepL-Auth-Key ' . $key],
+            'body'    => [
+                'text'         => $text,
+                'target_lang'  => $tgt,
+                'source_lang'  => $src,
+                'tag_handling' => 'html'
+            ]
+        ]);
+        if (is_wp_error($resp)) {
+            \OSCT\Core\Debug::add(['event' => 'deepl_error', 'reason' => 'wp_error', 'msg' => $resp->get_error_message()]);
+            return '';
+        }
+        $code = wp_remote_retrieve_response_code($resp);
+        $bodyStr = wp_remote_retrieve_body($resp);
+        if ($code !== 200) {
+            \OSCT\Core\Debug::add(['event' => 'deepl_error', 'reason' => 'http_' . $code, 'body' => mb_substr($bodyStr, 0, 300)]);
+            return '';
+        }
+        $body = json_decode($bodyStr, true);
+        if (!isset($body['translations'][0]['text'])) {
+            \OSCT\Core\Debug::add(['event' => 'deepl_error', 'reason' => 'no_field', 'body' => mb_substr($bodyStr, 0, 200)]);
+            return '';
+        }
+        return (string)$body['translations'][0]['text'];
+    }
+}
+
+
+Datei: src\Translation\Providers\GoogleProvider.php
+<?php
+
+namespace OSCT\Translation\Providers;
+
+use OSCT\Domain\Repos\OptionRepo;
+
+if (!defined('ABSPATH')) exit;
+
+final class GoogleProvider implements ProviderInterface
+{
+    public function __construct(private OptionRepo $opt) {}
+
+    public function name(): string
+    {
+        return 'google';
+    }
+
+    public function valid(): bool
+    {
+        $key = trim((string)$this->opt->get('api_google', ''));
+        return $key !== '';
+    }
+
+    public function translate(string $text, string $target, string $source): string
+    {
+        $key = trim((string)$this->opt->get('api_google', ''));
+        if ($key === '' || $text === '') return '';
+
+        $tgt = LangMap::googleTarget($target);
+        $src = LangMap::googleSource($source);
+
+        $chunks = $this->chunk($text, 4500);
+        $out = [];
+
+        foreach ($chunks as $chunk) {
+            $url = add_query_arg([
+                'key' => $key
+            ], 'https://translation.googleapis.com/language/translate/v2');
+
+            $resp = wp_remote_post($url, [
+                'timeout' => 25,
+                'headers' => ['Accept' => 'application/json'],
+                'body'    => [
+                    'q'      => $chunk,
+                    'target' => $tgt,
+                    'source' => $src,
+                    'format' => 'html'
+                ]
+            ]);
+
+            if (is_wp_error($resp)) {
+                \OSCT\Core\Debug::add(['event' => 'google_error', 'reason' => 'wp_error', 'msg' => $resp->get_error_message()]);
+                return '';
+            }
+            $code = wp_remote_retrieve_response_code($resp);
+            $bodyStr = wp_remote_retrieve_body($resp);
+            if ($code !== 200) {
+                \OSCT\Core\Debug::add(['event' => 'google_error', 'reason' => 'http_' . $code, 'body' => mb_substr($bodyStr, 0, 300)]);
+                return '';
+            }
+
+            $body = json_decode($bodyStr, true);
+            if (!isset($body['data']['translations'][0]['translatedText'])) {
+                \OSCT\Core\Debug::add(['event' => 'google_error', 'reason' => 'no_field', 'body' => mb_substr($bodyStr, 0, 200)]);
+                return '';
+            }
+            $out[] = (string)$body['data']['translations'][0]['translatedText'];
+        }
+
+        return implode('', $out);
+    }
+
+    private function chunk(string $html, int $limit): array
+    {
+        if (mb_strlen($html) <= $limit) return [$html];
+        $parts = [];
+        $buffer = '';
+        $segments = preg_split('/(<\/p>)/iu', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
+        foreach ($segments as $seg) {
+            $candidate = $buffer . $seg;
+            if (mb_strlen($candidate) > $limit && $buffer !== '') {
+                $parts[] = $buffer;
+                $buffer = $seg;
+            } else {
+                $buffer = $candidate;
+            }
+        }
+        if ($buffer !== '') $parts[] = $buffer;
+
+        $final = [];
+        foreach ($parts as $p) {
+            if (mb_strlen($p) <= $limit) {
+                $final[] = $p;
+                continue;
+            }
+            $final = array_merge($final, $this->chunkByWords($p, $limit));
+        }
+        return $final;
+    }
+
+    private function chunkByWords(string $text, int $limit): array
+    {
+        $out = [];
+        $buf = '';
+        $tokens = preg_split('/(\s+)/u', $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+        foreach ($tokens as $tok) {
+            $candidate = $buf . $tok;
+            if (mb_strlen($candidate) > $limit && $buf !== '') {
+                $out[] = $buf;
+                $buf = $tok;
+            } else {
+                $buf = $candidate;
+            }
+        }
+        if ($buf !== '') $out[] = $buf;
+        return $out;
+    }
+}
+
+
+Datei: src\Translation\Providers\LangMap.php
+<?php
+
+namespace OSCT\Translation\Providers;
+
+if (!defined('ABSPATH')) exit;
+
+final class LangMap
+{
+  public static function googleTarget(string $slug): string
+  {
+    $slug = strtolower(trim($slug));
+    $map = [
+      'en' => 'en',
+      'de' => 'de',
+      'pl' => 'pl',
+      'hu' => 'hu',
+      'hr' => 'hr',
+      'ro' => 'ro',
+      'bg' => 'bg',
+      'ru' => 'ru',
+      'en-gb' => 'en',
+      'en-us' => 'en',
+      'pt-br' => 'pt',
+      'pt-pt' => 'pt'
+    ];
+    return $map[$slug] ?? preg_replace('/[^a-z]/', '', $slug);
+  }
+
+  public static function googleSource(string $slug): string
+  {
+    return self::googleTarget($slug);
+  }
+
+  public static function deeplTarget(string $slug): string
+  {
+    $slug = strtolower(trim($slug));
+    $map = [
+      'de' => 'DE',
+      'en' => 'EN-GB',
+      'en-gb' => 'EN-GB',
+      'en-us' => 'EN-US',
+      'pl' => 'PL',
+      'hu' => 'HU',
+      'hr' => 'HR',
+      'ro' => 'RO',
+      'bg' => 'BG',
+      'ru' => 'RU',
+      'fr' => 'FR',
+      'it' => 'IT',
+      'es' => 'ES',
+      'nl' => 'NL',
+      'pt' => 'PT-PT',
+      'pt-pt' => 'PT-PT',
+      'pt-br' => 'PT-BR'
+    ];
+    return $map[$slug] ?? strtoupper($slug);
+  }
+
+  public static function deeplSource(string $slug): string
+  {
+    $slug = strtolower(trim($slug));
+    $map = [
+      'de' => 'DE',
+      'en' => 'EN',
+      'pl' => 'PL',
+      'hu' => 'HU',
+      'hr' => 'HR',
+      'ro' => 'RO',
+      'bg' => 'BG',
+      'ru' => 'RU',
+      'fr' => 'FR',
+      'it' => 'IT',
+      'es' => 'ES',
+      'nl' => 'NL',
+      'pt' => 'PT'
+    ];
+    return $map[$slug] ?? strtoupper($slug);
+  }
+}
+
+
+Datei: src\Translation\Providers\ProviderInterface.php
+<?php
+
+namespace OSCT\Translation\Providers;
+
+if (!defined('ABSPATH')) exit;
+
+interface ProviderInterface
+{
+    public function name(): string;
+    public function valid(): bool;
+    public function translate(string $text, string $target, string $source): string;
+}
+

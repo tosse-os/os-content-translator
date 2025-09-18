@@ -1,0 +1,798 @@
+Datei: os-content-translator.php
+<?php
+/*
+Plugin Name: OS Content Translator
+Description: Automatisiertes Übersetzungsmodul mit Polylang-Integration (modular).
+Version: 2.0.0
+Author: ORANGE SERVICES
+*/
+if (!defined('ABSPATH')) exit;
+
+define('OSCT_DIR', plugin_dir_path(__FILE__));
+define('OSCT_URL', plugin_dir_url(__FILE__));
+define('OSCT_NS', 'OSCT');
+
+//define('OSCT_TEST_JOB_ID', '7e526cb0-b8c6-4c4d-9e4b-98e2428757c8');
+
+require_once OSCT_DIR . 'src/Core/Autoloader.php';
+OSCT\Core\Autoloader::register();
+
+register_activation_hook(__FILE__, function () {
+    OSCT\Core\Installer::install();
+});
+
+add_action('plugins_loaded', function () {
+    (new OSCT\Core\Hooks())->register();
+}, 20);
+
+//HM Jobs Importer
+add_action('init', function () {
+    if (!function_exists('pll_register_string')) return;
+
+    $GLOBALS['os_pll_defaults'] = [
+        'Suchen nach' => [
+            'en' => 'Search for',
+            'ro' => 'Căutare după',
+            'pl' => 'Szukaj',
+            'hu' => 'Keresés',
+            'bg' => 'Търсене на',
+            'de' => 'Suchen nach',
+            'hr' => 'Pretraži',
+        ],
+        'Jobtitel oder Ort...' => [
+            'en' => 'Job title or location...',
+            'ro' => 'Titlu job sau locație...',
+            'pl' => 'Stanowisko lub lokalizacja...',
+            'hu' => 'Állás megnevezése vagy hely...',
+            'bg' => 'Длъжност или място...',
+            'de' => 'Jobtitel oder Ort...',
+            'hr' => 'Naziv posla ili mjesto...',
+        ],
+        'von' => [
+            'en' => 'of',
+            'ro' => 'din',
+            'pl' => 'z',
+            'hu' => 'ből',
+            'bg' => 'от',
+            'de' => 'von',
+            'hr' => 'od',
+        ],
+        'Stellenangeboten' => [
+            'en' => 'job offers',
+            'ro' => 'oferte de muncă',
+            'pl' => 'oferty pracy',
+            'hu' => 'állásajánlatok',
+            'bg' => 'обяви за работа',
+            'de' => 'Stellenangeboten',
+            'hr' => 'ponude poslova',
+        ],
+    ];
+
+    foreach (array_keys($GLOBALS['os_pll_defaults']) as $original) {
+        pll_register_string(sanitize_title($original), $original, 'Theme-Texte');
+    }
+});
+
+function os_pll($text)
+{
+    $translated = function_exists('pll__') ? pll__($text) : $text;
+    if ($translated !== $text) return $translated;
+    $lang = function_exists('pll_current_language') ? pll_current_language() : 'de';
+    if (isset($GLOBALS['os_pll_defaults'][$text][$lang])) return $GLOBALS['os_pll_defaults'][$text][$lang];
+    return $text;
+}
+
+function eos_pll($text)
+{
+    echo os_pll($text);
+}
+
+
+Datei: src\Admin\Menu.php
+<?php
+namespace OSCT\Admin;
+use OSCT\Admin\Pages\DashboardPage;
+use OSCT\Admin\Pages\SettingsPage;
+use OSCT\Admin\Pages\DryRunPage;
+use OSCT\Admin\Pages\LogPage;
+use OSCT\Admin\Pages\DebugPage;
+use OSCT\Admin\Pages\JobsPage;
+
+if (!defined('ABSPATH')) exit;
+
+final class Menu
+{
+    public function __construct(
+        private DashboardPage $dashboard,
+        private SettingsPage $settings,
+        private DryRunPage $dry,
+        private LogPage $logs,
+        private DebugPage $debug,
+        private JobsPage $jobs // ← neu
+    ) {}
+
+    public function register(): void
+    {
+        add_menu_page('Übersetzungsmodul', 'Übersetzungsmodul', 'manage_options', 'osct-dashboard', [$this->dashboard, 'render'], 'dashicons-translation', 58);
+        add_submenu_page('osct-dashboard', 'Dashboard', 'Dashboard', 'manage_options', 'osct-dashboard', [$this->dashboard, 'render']);
+        add_submenu_page('osct-dashboard', 'Einstellungen', 'Einstellungen', 'manage_options', 'osct-settings', [$this->settings, 'render']);
+        add_submenu_page('osct-dashboard', 'Trockenlauf', 'Trockenlauf', 'manage_options', 'osct-dry-run', [$this->dry, 'render']);
+        add_submenu_page('osct-dashboard', 'Logs', 'Logs', 'manage_options', 'osct-logs', [$this->logs, 'render']);
+        add_submenu_page('osct-dashboard', 'Letzter Lauf (Debug)', 'Letzter Lauf (Debug)', 'manage_options', 'osct-debug', [$this->debug, 'render']);
+        add_submenu_page('osct-dashboard', 'Jobs-Übersicht', 'Jobs-Übersicht', 'manage_options', 'osct-jobs', [$this->jobs, 'render']); // ← neu
+    }
+}
+
+
+Datei: src\Admin\Pages\DashboardPage.php
+<?php
+
+namespace OSCT\Admin\Pages;
+
+use OSCT\Domain\Repos\OptionRepo;
+use OSCT\Domain\Repos\LanguageRepo;
+use OSCT\Domain\Repos\ContentRepo;
+use OSCT\Domain\Repos\JobsRepo;
+use OSCT\Translation\TranslationService;
+
+if (!defined('ABSPATH')) exit;
+
+final class DashboardPage
+{
+    private JobsRepo $jobs;
+
+    public function __construct(
+        private OptionRepo $opt,
+        private LanguageRepo $langsRepo,
+        private ContentRepo $content,
+        private TranslationService $translator,
+        ?JobsRepo $jobs = null
+    ) {
+        $this->jobs = $jobs ?: new JobsRepo();
+    }
+
+    public function render(): void
+    {
+        $o         = $this->opt->all();
+        $active    = (array)($o['languages_active'] ?? []);
+        $menuId    = (int)($o['menu_id'] ?? 0);
+        $menuName  = $menuId ? $this->content->menuName($menuId) : '';
+        $wlMenu    = (array)($o['page_whitelist'] ?? []);
+        $wlExtra   = (array)($o['page_whitelist_extra'] ?? []);
+        $wlBlocks  = (array)($o['block_whitelist'] ?? []);
+        $wlPages   = array_values(array_unique(array_map('intval', array_merge($wlMenu, $wlExtra))));
+        $langs     = $this->langsRepo->all();
+
+        $tr = get_transient('osct_translate_result');
+        delete_transient('osct_translate_result');
+
+        echo '<div class="wrap"><h1>OS Content Translator – Dashboard</h1>';
+        if ($tr && is_array($tr)) {
+            echo '<div class="notice notice-success is-dismissible"><p>Übersetzung abgeschlossen. Neu: ' . intval($tr['created']) . ', übersprungen: ' . intval($tr['skipped']) . '.</p></div>';
+        }
+
+        $menuDbg = get_transient('osct_menu_debug');
+        delete_transient('osct_menu_debug');
+        if ($menuDbg && is_array($menuDbg)) {
+            $s = $menuDbg['summary'] ?? [];
+            echo '<h2>Menü-Clone Debug</h2>';
+            echo '<p>Erstellt: ' . intval($s['created'] ?? 0) . ', Zuweisungen: ' . intval($s['assigned'] ?? 0) . ', Items: ' . intval($s['cloned_items'] ?? 0) . '</p>';
+            echo '<table class="widefat striped"><thead><tr>';
+            echo '<th>Zeit</th><th>Sprache</th><th>Ziel-Menü</th><th>Ziel-Menü-ID</th><th>Aktion</th><th>Status</th><th>Neu-ID</th><th>Src-ID</th><th>Typ</th><th>Objekt</th><th>Obj-ID</th><th>Titel</th><th>URL</th><th>Msg</th>';
+            echo '</tr></thead><tbody>';
+            foreach (($menuDbg['rows'] ?? []) as $r) {
+                echo '<tr>';
+                echo '<td>' . esc_html($r['ts']) . '</td>';
+                echo '<td>' . esc_html($r['lang'] ?? '') . '</td>';
+                echo '<td>' . esc_html($r['dst_menu'] ?? '') . '</td>';
+                echo '<td>' . intval($r['dst_menu_id'] ?? 0) . '</td>';
+                echo '<td>' . esc_html($r['action'] ?? '') . '</td>';
+                echo '<td>' . esc_html($r['status'] ?? '') . '</td>';
+                echo '<td>' . intval($r['new_item_id'] ?? 0) . '</td>';
+                echo '<td>' . intval($r['src_item_id'] ?? 0) . '</td>';
+                echo '<td>' . esc_html($r['type'] ?? '') . '</td>';
+                echo '<td>' . esc_html($r['object'] ?? '') . '</td>';
+                echo '<td>' . intval($r['object_id'] ?? 0) . '</td>';
+                echo '<td>' . esc_html($r['title'] ?? '') . '</td>';
+                echo '<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis">' . esc_html($r['url'] ?? '') . '</td>';
+                echo '<td>' . esc_html($r['message'] ?? '') . '</td>';
+                echo '</tr>';
+            }
+            echo '</tbody></table>';
+        }
+
+        echo '<h2>Status</h2><table class="widefat striped"><tbody>';
+        echo '<tr><td>Aktives Menü</td><td>' . ($menuId ? esc_html($menuName) . " (#{$menuId})" : '–') . '</td></tr>';
+        echo '<tr><td>Freigegebene Seiten</td><td>' . count($wlPages) . '</td></tr>';
+        echo '<tr><td>Freigegebene Blöcke</td><td>' . count($wlBlocks) . '</td></tr>';
+        echo '<tr><td>Aktive Zielsprachen</td><td>' . esc_html(implode(', ', $active)) . '</td></tr>';
+        echo '</tbody></table>';
+
+        $defaultLang = $this->langsRepo->default();
+        $totalJobs = $this->jobs->countAll();
+        $anyTranslated = $this->jobs->countAnyTranslated($active);
+        echo '<h2>Stellenangebote</h2>';
+        echo '<table class="widefat striped"><tbody>';
+        echo '<tr><td>Gesamt</td><td>' . intval($totalJobs) . '</td></tr>';
+        echo '<tr><td>Bereits eingesetzt (mind. 1 Sprache)</td><td>' . intval($anyTranslated) . ' / ' . intval($totalJobs) . ' (' . ($totalJobs ? round($anyTranslated / $totalJobs * 100) : 0) . '%)</td></tr>';
+        echo '</tbody></table>';
+
+        if (!empty($active) && $totalJobs > 0) {
+            echo '<h3>Übersetzungsstand je Zielsprache</h3>';
+            echo '<table class="widefat striped"><thead><tr><th>Sprache</th><th>Übersetzt</th><th>Anteil</th></tr></thead><tbody>';
+            foreach ($active as $l) {
+                if ($l === $defaultLang) continue;
+                $done = $this->jobs->countTranslated($l);
+                $pct = $totalJobs ? round($done / $totalJobs * 100) : 0;
+                echo '<tr><td>' . esc_html($l) . '</td><td>' . intval($done) . ' / ' . intval($totalJobs) . '</td><td>' . $pct . '%</td></tr>';
+            }
+            echo '</tbody></table>';
+        }
+
+        echo '<h2>Schneller Trockenlauf</h2>';
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+        echo '<input type="hidden" name="action" value="osct_do_dry_run">';
+        wp_nonce_field('osct_do_dry_run');
+        echo '<p><button class="button button-primary">Trockenlauf starten</button> ';
+        echo '<a class="button" href="' . esc_url(add_query_arg(['page' => 'osct-settings'], admin_url('admin.php'))) . '">Einstellungen</a></p></form>';
+
+        echo '<h2>Übersetzung starten</h2>';
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+        echo '<input type="hidden" name="action" value="osct_do_translate">';
+        wp_nonce_field('osct_do_translate');
+        echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_test" value="1" checked> Testlauf</label></p>';
+        echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_jobs" value="1"> Stellenanzeigen</label></p>';
+        echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_menu_pages" value="1"> Seiten im gewählten Menü</label></p>';
+        echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_extra_pages" value="1"> Standardseiten</label></p>';
+        echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_blocks" value="1"> Reusable Blocks</label></p>';
+        echo '<p style="margin-top:12px"><label><input type="checkbox" name="osct_force" value="1"> Force: vorhandene Zielversionen trotz "OK" neu übersetzen</label></p>';
+        echo '<p>Übersetzt nur die aktivierten Gruppen in die aktiven Zielsprachen.</p>';
+        echo '<p><button class="button button-primary">Übersetzung jetzt ausführen</button> ';
+        echo '<a class="button" href="' . esc_url(add_query_arg(['page' => 'osct-debug'], admin_url('admin.php'))) . '">Letzter Lauf (Debug)</a></p>';
+        echo '</form>';
+
+
+        if (!empty($active) && !empty($wlPages)) {
+            echo '<h2>Seiten × Sprachen</h2><table class="widefat striped"><thead><tr><th>Seite</th>';
+            foreach ($active as $l) echo '<th>' . esc_html($l) . '</th>';
+            echo '</tr></thead><tbody>';
+            $pages = $this->content->getPostsByIds($wlPages, 'page');
+            foreach ($pages as $p) {
+                echo '<tr><td>#' . $p->ID . ' ' . esc_html(get_the_title($p)) . '</td>';
+                foreach ($active as $l) echo '<td>' . $this->badge($this->translator->state($p->ID, $l)) . '</td>';
+                echo '</tr>';
+            }
+            echo '</tbody></table>';
+        }
+
+        if (!empty($active) && !empty($wlBlocks)) {
+            echo '<h2>Reusable Blocks × Sprachen</h2><table class="widefat striped"><thead><tr><th>Block</th>';
+            foreach ($active as $l) echo '<th>' . esc_html($l) . '</th>';
+            echo '</tr></thead><tbody>';
+            $blocks = $this->content->getPostsByIds($wlBlocks, 'wp_block');
+            foreach ($blocks as $b) {
+                echo '<tr><td>#' . $b->ID . ' ' . esc_html(get_the_title($b)) . '</td>';
+                foreach ($active as $l) echo '<td>' . $this->badge($this->translator->state($b->ID, $l)) . '</td>';
+                echo '</tr>';
+            }
+            echo '</tbody></table>';
+        }
+
+        echo '<h2>Freigegebene Inhalte</h2>';
+        echo '<table class="widefat striped"><thead><tr>';
+        echo '<th>ID</th><th>Titel</th><th>Permalink</th><th>Typ</th><th>Quelle</th>';
+        echo '</tr></thead><tbody>';
+
+        if (!empty($wlPages)) {
+            $posts = $this->content->getPostsByIds($wlPages, 'page');
+            foreach ($posts as $p) {
+                $quelle = in_array($p->ID, $wlMenu, true) ? 'Menü' : 'Manuell';
+                echo '<tr>';
+                echo '<td>#' . (int)$p->ID . '</td>';
+                echo '<td>' . esc_html(get_the_title($p)) . '</td>';
+                echo '<td><a href="' . esc_url(get_permalink($p)) . '" target="_blank">' . esc_html(get_permalink($p)) . '</a></td>';
+                echo '<td>page</td>';
+                echo '<td>' . $quelle . '</td>';
+                echo '</tr>';
+            }
+        }
+
+        if (!empty($wlBlocks)) {
+            $blocks = $this->content->getPostsByIds($wlBlocks, 'wp_block');
+            foreach ($blocks as $b) {
+                echo '<tr>';
+                echo '<td>#' . (int)$b->ID . '</td>';
+                echo '<td>' . esc_html(get_the_title($b)) . '</td>';
+                echo '<td><a href="' . esc_url(get_edit_post_link($b->ID)) . '" target="_blank">' . esc_html(get_edit_post_link($b->ID)) . '</a></td>';
+                echo '<td>wp_block</td>';
+                echo '<td>Block</td>';
+                echo '</tr>';
+            }
+        }
+        echo '</tbody></table>';
+
+        echo '</div>';
+    }
+
+    private function badge(string $s): string
+    {
+        return $s === 'ok' ? '<span style="color:#0a0">OK</span>' : ($s === 'stale' ? '<span style="color:#e69500">Veraltet</span>' :
+            '<span style="color:#a00">Fehlt</span>');
+    }
+}
+
+
+Datei: src\Admin\Pages\DebugPage.php
+<?php
+
+namespace OSCT\Admin\Pages;
+
+use OSCT\Domain\Repos\LogRepo;
+
+if (!defined('ABSPATH')) exit;
+
+final class DebugPage
+{
+    private LogRepo $logs;
+
+    public function __construct()
+    {
+        $this->logs = new LogRepo();
+    }
+
+    public function render(): void
+    {
+        global $wpdb;
+
+        $runId = $this->logs->lastRunId();
+        echo '<div class="wrap"><h1>OS Content Translator – Letzter Lauf (Debug)</h1>';
+
+        if (!$runId) {
+            echo '<p>Keine Läufe vorhanden.</p></div>';
+            return;
+        }
+
+        $table = $wpdb->prefix . 'osct_translation_log';
+        $rows = $wpdb->get_results(
+            $wpdb->prepare("SELECT * FROM {$table} WHERE run_id=%s ORDER BY id ASC", $runId),
+            ARRAY_A
+        );
+
+        $started = $rows ? $rows[0]['created_at'] : '–';
+        $ended   = $rows ? $rows[count($rows) - 1]['created_at'] : '–';
+
+        $sumWords = 0;
+        $sumChars = 0;
+        foreach ($rows as $r) {
+            $sumWords += (int)$r['words_title'] + (int)$r['words_content'];
+            $sumChars += (int)$r['chars_title'] + (int)$r['chars_content'];
+        }
+
+        $jobSum = $this->logs->lastRunJobSummary();
+
+        echo '<p><strong>Run-ID:</strong> ' . esc_html($runId) . ' &nbsp; ';
+        echo '<strong>Start:</strong> ' . esc_html($started) . ' &nbsp; ';
+        echo '<strong>Ende:</strong> ' . esc_html($ended) . '</p>';
+
+        echo '<p><strong>Gesamt Wörter:</strong> ' . intval($sumWords) .
+            ' &nbsp; <strong>Gesamt Zeichen:</strong> ' . intval($sumChars) . '</p>';
+
+        echo '<h2>Stellenangebote – Zusammenfassung (dieser Lauf)</h2>';
+        echo '<table class="widefat striped"><tbody>';
+        echo '<tr><td>Einträge (create/update)</td><td>' . intval($jobSum['entries'] ?? 0) . '</td></tr>';
+        echo '<tr><td>Wörter</td><td>' . intval($jobSum['words'] ?? 0) . '</td></tr>';
+        echo '<tr><td>Zeichen</td><td>' . intval($jobSum['chars'] ?? 0) . '</td></tr>';
+        echo '</tbody></table>';
+
+        echo '<h2>Schritte</h2>';
+        echo '<table class="widefat striped"><thead><tr>';
+        echo '<th>Zeit</th>';
+        echo '<th>Post</th>';
+        echo '<th>JobID</th>'; // NEU
+        echo '<th>Typ</th>';
+        echo '<th>Quelle→Ziel</th>';
+        echo '<th>Provider</th>';
+        echo '<th>Aktion</th>';
+        echo '<th>Status</th>';
+        echo '<th>SrcHash</th>';
+        echo '<th>Wörter</th>';
+        echo '<th>Zeichen</th>';
+        echo '<th>Nachricht</th>';
+        echo '</tr></thead><tbody>';
+
+        foreach ($rows as $r) {
+            $postId = (int)$r['post_id'];
+            $type   = $r['post_type'];
+
+            $postLabel = ($postId === 0 && $type === 'job') ? '–' : ('#' . $postId);
+
+            // JobID aus message extrahieren: [job <id>] oder job_id=<id>
+            $jobId = '';
+            if (preg_match('/\\[job\\s+([^\\]]+)\\]/i', (string)$r['message'], $m)) {
+                $jobId = $m[1];
+            } elseif (preg_match('/\\bjob_id=([a-f0-9\\-]{8,})/i', (string)$r['message'], $m)) {
+                $jobId = $m[1];
+            }
+
+            $words  = (int)$r['words_title'] + (int)$r['words_content'];
+            $chars  = (int)$r['chars_title'] + (int)$r['chars_content'];
+
+            echo '<tr>';
+            echo '<td>' . esc_html($r['created_at']) . '</td>';
+            echo '<td>' . esc_html($postLabel) . '</td>';
+            echo '<td>' . esc_html($jobId ?: '–') . '</td>';
+            echo '<td>' . esc_html($type) . '</td>';
+            echo '<td>' . esc_html($r['source_lang'] . ' → ' . $r['target_lang']) . '</td>';
+            echo '<td>' . esc_html($r['provider']) . '</td>';
+            echo '<td>' . esc_html($r['action']) . '</td>';
+            echo '<td>' . esc_html($r['status']) . '</td>';
+            echo '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis">' . esc_html($r['src_hash']) . '</td>';
+            echo '<td>' . intval($words) . '</td>';
+            echo '<td>' . intval($chars) . '</td>';
+            echo '<td>' . esc_html($r['message']) . '</td>';
+            echo '</tr>';
+        }
+
+        echo '</tbody></table>';
+        echo '</div>';
+    }
+}
+
+
+Datei: src\Admin\Pages\DryRunPage.php
+<?php
+namespace OSCT\Admin\Pages;
+use OSCT\Domain\Repos\OptionRepo;
+use OSCT\Domain\Repos\LanguageRepo;
+use OSCT\Domain\Repos\ContentRepo;
+use OSCT\Translation\TranslationService;
+
+if (!defined('ABSPATH')) exit;
+
+final class DryRunPage {
+    public function __construct(
+        private OptionRepo $opt,
+        private LanguageRepo $langs,
+        private ContentRepo $content,
+        private TranslationService $translator
+    ) {}
+
+    public function render(): void {
+        $res = get_transient('osct_dry_result'); delete_transient('osct_dry_result');
+        echo '<div class="wrap"><h1>OS Content Translator – Trockenlauf</h1>';
+        if ($res) {
+            echo '<h2>Ergebnis</h2>';
+            echo '<pre style="background:#fff;border:1px solid #ddd;padding:12px;max-height:400px;overflow:auto">'.esc_html(print_r($res,true)).'</pre>';
+        } else {
+            echo '<p>Noch kein Trockenlauf ausgeführt.</p>';
+        }
+        echo '<p><a class="button" href="'.esc_url(add_query_arg(['page'=>'osct-dashboard'], admin_url('admin.php'))).'">Zurück zum Dashboard</a></p>';
+        echo '</div>';
+    }
+}
+
+
+Datei: src\Admin\Pages\JobsPage.php
+<?php
+
+namespace OSCT\Admin\Pages;
+
+use OSCT\Domain\Repos\OptionRepo;
+use OSCT\Domain\Repos\LanguageRepo;
+use OSCT\Domain\Repos\JobsRepo;
+
+if (!defined('ABSPATH')) exit;
+
+final class JobsPage
+{
+  public function __construct(
+    private OptionRepo $opt,
+    private LanguageRepo $langs,
+    private JobsRepo $repo
+  ) {}
+
+  public function render(): void
+  {
+    $activeLangs = (array)$this->opt->get('languages_active', []);
+    $defaultLang = $this->langs->default();
+
+    // Zielsprachen ohne Default
+    $allTargetLangs = array_values(array_filter($activeLangs, fn($l) => $l !== $defaultLang));
+
+    // --- Filter & Sorting ---
+    $s        = isset($_GET['s']) ? sanitize_text_field($_GET['s']) : '';
+    $filterL  = isset($_GET['lang']) ? sanitize_text_field($_GET['lang']) : '';
+    $orderby  = isset($_GET['orderby']) ? sanitize_text_field($_GET['orderby']) : 'job_id';
+    $order    = (isset($_GET['order']) && strtolower($_GET['order']) === 'desc') ? 'desc' : 'asc';
+    $paged    = isset($_GET['paged']) ? max(1, (int)$_GET['paged']) : 1;
+    $perPage  = 50;
+
+    // „gültige“ Filter-Sprache
+    $hasLangFilter = ($filterL !== '' && in_array($filterL, $allTargetLangs, true));
+    $columnLangs   = $hasLangFilter ? [$filterL] : $allTargetLangs;
+
+    // Source-Rows
+    $rows = $this->repo->all();
+
+    // Suche
+    if ($s !== '') {
+      $needle = mb_strtolower($s);
+      $rows = array_values(array_filter($rows, function ($r) use ($needle) {
+        $jid = mb_strtolower((string)($r['job_id'] ?? ''));
+        $jnm = mb_strtolower((string)($r['job_name'] ?? ''));
+        return (str_contains($jid, $needle) || str_contains($jnm, $needle));
+      }));
+    }
+
+    // Aufbereiten
+    $data = [];
+    foreach ($rows as $r) {
+      $jobId   = (string)($r['job_id'] ?? '');
+      $jobName = (string)($r['job_name'] ?? '');
+      $rowId   = $r['id'] ?? ($r['ID'] ?? '–');
+
+      // Status pro (sichtbarer) Sprache
+      $translated = 0;
+      $langsState = [];
+      foreach ($columnLangs as $lang) {
+        $tr = $this->repo->getTranslation($jobId, $lang);
+        $ok = $tr ? 1 : 0;
+        $translated += $ok;
+        $langsState[$lang] = [
+          'ok'         => $ok,
+          'updated_at' => $tr['updated_at'] ?? null,
+        ];
+      }
+
+      // „Zuletzt aktualisiert“:
+      // - wenn Sprachfilter aktiv: updated_at für diese Sprache
+      // - sonst: Max(updated_at) über alle Übersetzungen
+      $lastUpdated = null;
+      if ($hasLangFilter) {
+        $lastUpdated = $langsState[$filterL]['updated_at'] ?? null;
+      } else {
+        $allTr = $this->repo->allTranslationsForJob($jobId);
+        foreach ($allTr as $tr) {
+          $ts = $tr['updated_at'] ?? null;
+          if ($ts && (!$lastUpdated || strcmp($ts, $lastUpdated) > 0)) {
+            $lastUpdated = $ts;
+          }
+        }
+      }
+
+      $data[] = [
+        '_row_id'       => $rowId,
+        'job_id'        => $jobId,
+        'job_name'      => $jobName,
+        '_translated'   => $translated,
+        '_langs'        => $langsState,
+        '_updated_at'   => $lastUpdated, // GMT (current_time('mysql', true))
+      ];
+    }
+
+    // Sortierung
+    usort($data, function ($a, $b) use ($orderby, $order, $columnLangs, $hasLangFilter, $filterL) {
+      $cmp = 0;
+      switch ($orderby) {
+        case 'job_id':
+          $cmp = strnatcmp((string)$a['job_id'], (string)$b['job_id']);
+          break;
+        case 'job_name':
+          $cmp = strnatcmp((string)$a['job_name'], (string)$b['job_name']);
+          break;
+        case 'translated':
+          $cmp = ($a['_translated'] <=> $b['_translated']);
+          break;
+        case 'updated_at':
+          $au = $a['_updated_at'] ?? '';
+          $bu = $b['_updated_at'] ?? '';
+          // leere nach hinten
+          if ($au === '' && $bu !== '') $cmp = -1;
+          elseif ($au !== '' && $bu === '') $cmp = 1;
+          else $cmp = strnatcmp($au, $bu);
+          break;
+        default:
+          // Sortierung pro Sprachspalte: ✓ (1) vor – (0)
+          if (in_array($orderby, $columnLangs, true)) {
+            $av = (int)($a['_langs'][$orderby]['ok'] ?? 0);
+            $bv = (int)($b['_langs'][$orderby]['ok'] ?? 0);
+            $cmp = ($av <=> $bv);
+            break;
+          }
+          $cmp = 0;
+      }
+      return ($order === 'desc') ? -$cmp : $cmp;
+    });
+
+    // Pagination
+    $total   = count($data);
+    $pages   = max(1, (int)ceil($total / $perPage));
+    $offset  = ($paged - 1) * $perPage;
+    $slice   = array_slice($data, $offset, $perPage);
+
+    echo '<div class="wrap"><h1>OS Content Translator – Jobs-Übersicht</h1>';
+
+    // Filterleiste
+    echo '<form method="get" action="">';
+    echo '<input type="hidden" name="page" value="osct-jobs">';
+    echo '<p style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">';
+    echo '<input type="search" name="s" value="' . esc_attr($s) . '" placeholder="JobID oder Jobname" class="regular-text" style="max-width:260px">';
+    echo '<label>Sprache: ';
+    echo '<select name="lang">';
+    echo '<option value="">Alle</option>';
+    foreach ($allTargetLangs as $L) {
+      echo '<option value="' . esc_attr($L) . '" ' . selected($filterL, $L, false) . '>' . esc_html(strtoupper($L)) . '</option>';
+    }
+    echo '</select></label>';
+    echo '<button class="button">Filtern</button>';
+    echo '<a class="button" href="' . esc_url(add_query_arg(['page' => 'osct-jobs'], admin_url('admin.php'))) . '">Zurücksetzen</a>';
+    echo '</p>';
+    echo '</form>';
+
+    // Summen (auf Basis sichtbarer Sprachspalten)
+    $sumTranslated = array_sum(array_map(fn($r) => (int)$r['_translated'], $data));
+    echo '<p><strong>Gesamt Jobs:</strong> ' . intval($total) . '. ';
+    echo '<strong>Summe Übersetzungen (in sichtbaren Sprachen):</strong> ' . intval($sumTranslated) . '.</p>';
+
+    // Sortable-Header Helper
+    $makeSort = function ($key, $label) use ($orderby, $order, $s, $paged, $filterL) {
+      $newOrder = ($orderby === $key && $order === 'asc') ? 'desc' : 'asc';
+      $url = add_query_arg([
+        'page'    => 'osct-jobs',
+        's'       => $s,
+        'lang'    => $filterL,
+        'orderby' => $key,
+        'order'   => $newOrder,
+        'paged'   => $paged
+      ], admin_url('admin.php'));
+      $arrow = '';
+      if ($orderby === $key) $arrow = $order === 'asc' ? ' ↑' : ' ↓';
+      return '<a href="' . esc_url($url) . '">' . esc_html($label . $arrow) . '</a>';
+    };
+
+    echo '<table class="widefat striped"><thead><tr>';
+    echo '<th>' . $makeSort('row_id', 'ID') . '</th>';
+    echo '<th>' . $makeSort('job_id', 'JobID') . '</th>';
+    echo '<th>' . $makeSort('job_name', 'Jobname') . '</th>';
+    echo '<th>' . $makeSort('translated', 'Übersetzt (Anz.)') . '</th>';
+    // pro sichtbarer Sprache eine Spalte
+    foreach ($columnLangs as $lang) {
+      echo '<th>' . $makeSort($lang, strtoupper(esc_html($lang))) . '</th>';
+    }
+    echo '<th>' . $makeSort('updated_at', 'Zuletzt aktualisiert') . '</th>';
+    echo '</tr></thead><tbody>';
+
+    if (!$slice) {
+      echo '<tr><td colspan="' . (5 + count($columnLangs)) . '"><em>Keine Einträge.</em></td></tr>';
+    } else {
+      foreach ($slice as $r) {
+        echo '<tr>';
+        echo '<td>' . esc_html($r['_row_id']) . '</td>';
+        echo '<td><code>' . esc_html($r['job_id']) . '</code></td>';
+        echo '<td>' . esc_html($r['job_name']) . '</td>';
+        echo '<td>' . intval($r['_translated']) . '</td>';
+        foreach ($columnLangs as $lang) {
+          $ok = !empty($r['_langs'][$lang]['ok']);
+          echo '<td>' . ($ok ? '<span style="color:#0a0">✓</span>' : '<span style="color:#a00">–</span>') . '</td>';
+        }
+        $lu = $r['_updated_at'] ?? '';
+        // updated_at ist in GMT gespeichert (current_time('mysql', 1)); hübsch formatieren
+        $luDisp = $lu ? esc_html(get_date_from_gmt($lu, 'Y-m-d H:i:s')) : '–';
+        echo '<td>' . $luDisp . '</td>';
+        echo '</tr>';
+      }
+    }
+
+    echo '</tbody></table>';
+
+    // Pagination
+    if ($pages > 1) {
+      echo '<div class="tablenav"><div class="tablenav-pages">';
+      for ($i = 1; $i <= $pages; $i++) {
+        $url = add_query_arg([
+          'page'    => 'osct-jobs',
+          's'       => $s,
+          'lang'    => $filterL,
+          'orderby' => $orderby,
+          'order'   => $order,
+          'paged'   => $i
+        ], admin_url('admin.php'));
+        $cls = $i == $paged ? 'class="page-numbers current"' : 'class="page-numbers"';
+        echo '<a ' . $cls . ' href="' . esc_url($url) . '">' . $i . '</a> ';
+      }
+      echo '</div></div>';
+    }
+
+    echo '</div>';
+  }
+}
+
+
+Datei: src\Admin\Pages\LogPage.php
+<?php
+namespace OSCT\Admin\Pages;
+use OSCT\Domain\Repos\LogRepo;
+
+if (!defined('ABSPATH')) exit;
+
+final class LogPage {
+    public function __construct(private LogRepo $repo) {}
+
+    public function render(): void {
+        $search = isset($_GET['s']) ? sanitize_text_field($_GET['s']) : '';
+        $from   = isset($_GET['from']) ? sanitize_text_field($_GET['from']) : '';
+        $to     = isset($_GET['to']) ? sanitize_text_field($_GET['to']) : '';
+        $paged  = isset($_GET['paged']) ? max(1, (int)$_GET['paged']) : 1;
+
+        if (isset($_GET['export']) && $_GET['export']==='csv') {
+            $csv = $this->repo->exportCsv(['search'=>$search,'from'=>$from,'to'=>$to]);
+            header('Content-Type: text/csv');
+            header('Content-Disposition: attachment; filename=osct-logs.csv');
+            echo $csv;
+            exit;
+        }
+
+        $data = $this->repo->list(['search'=>$search,'from'=>$from,'to'=>$to,'paged'=>$paged,'per_page'=>50]);
+        $sums = $this->repo->sums(['from'=>$from,'to'=>$to]);
+
+        echo '<div class="wrap"><h1>OS Content Translator – Logs</h1>';
+
+        echo '<form method="get" action="">';
+        echo '<input type="hidden" name="page" value="osct-logs">';
+        echo '<p>';
+        echo '<input type="text" name="s" value="'.esc_attr($search).'" placeholder="Post-ID oder Sprache" class="regular-text" style="max-width:220px">';
+        echo ' Von: <input type="date" name="from" value="'.esc_attr($from).'">';
+        echo ' Bis: <input type="date" name="to" value="'.esc_attr($to).'">';
+        echo ' <button class="button">Filtern</button>';
+        echo ' <a class="button" href="'.esc_url(add_query_arg(['page'=>'osct-logs'], admin_url('admin.php'))).'">Reset</a>';
+        echo ' <a class="button button-secondary" href="'.esc_url(add_query_arg(['page'=>'osct-logs','s'=>$search,'from'=>$from,'to'=>$to,'export'=>'csv'], admin_url('admin.php'))).'">CSV export</a>';
+        echo '</p>';
+        echo '</form>';
+
+        echo '<p><strong>Summen</strong>: Einträge '.(int)$sums['entries'].', Wörter '.(int)$sums['words'].', Zeichen '.(int)$sums['chars'].'</p>';
+
+        $last = $this->repo->lastRunJobSummary();
+        echo '<p><strong>Letzter Lauf – Stellenanzeigen:</strong> Übersetzt ' . (int)$last['entries'] . ' Einträge, Wörter ' . (int)$last['words'] . ', Zeichen ' . (int)$last['chars'] . '.</p>';
+
+        echo '<table class="widefat striped"><thead><tr>';
+        echo '<th>ID</th><th>Zeit</th><th>Post</th><th>Typ</th><th>Sprache</th><th>Provider</th><th>Aktion</th><th>Status</th><th>Wörter</th><th>Zeichen</th><th>Message</th>';
+        echo '</tr></thead><tbody>';
+
+        foreach ($data['rows'] as $r) {
+            $words = (int)$r['words_title'] + (int)$r['words_content'];
+            $chars = (int)$r['chars_title'] + (int)$r['chars_content'];
+            $postLink = get_edit_post_link((int)$r['post_id']);
+            echo '<tr>';
+            echo '<td>'.(int)$r['id'].'</td>';
+            echo '<td>'.esc_html( get_date_from_gmt($r['created_at'],'Y-m-d H:i:s') ).'</td>';
+            echo '<td>#'.(int)$r['post_id'].' '.($postLink?'<a href="'.esc_url($postLink).'" target="_blank">edit</a>':'').'</td>';
+            echo '<td>'.esc_html($r['post_type']).'</td>';
+            echo '<td>'.esc_html($r['source_lang']).' → '.esc_html($r['target_lang']).'</td>';
+            echo '<td>'.esc_html($r['provider']).'</td>';
+            echo '<td>'.esc_html($r['action']).'</td>';
+            echo '<td>'.esc_html($r['status']).'</td>';
+            echo '<td>'.$words.'</td>';
+            echo '<td>'.$chars.'</td>';
+            echo '<td>'.esc_html($r['message']).'</td>';
+            echo '</tr>';
+        }
+
+        echo '</tbody></table>';
+
+        $total = $data['total'];
+        $per   = $data['per_page'];
+        $pages = max(1, (int)ceil($total/$per));
+        if ($pages > 1) {
+            echo '<div class="tablenav"><div class="tablenav-pages">';
+            for ($i=1;$i<=$pages;$i++) {
+                $url = add_query_arg(['page'=>'osct-logs','s'=>$search,'from'=>$from,'to'=>$to,'paged'=>$i], admin_url('admin.php'));
+                $cls = $i==$data['paged'] ? 'class="page-numbers current"' : 'class="page-numbers"';
+                echo '<a '.$cls.' href="'.esc_url($url).'">'.$i.'</a> ';
+            }
+            echo '</div></div>';
+        }
+
+        echo '</div>';
+    }
+}
+
