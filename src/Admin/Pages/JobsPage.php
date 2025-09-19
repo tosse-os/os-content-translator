@@ -234,10 +234,8 @@ final class JobsPage
               strtoupper($lang),
               $r['job_id']
             );
-            $confirmJson = wp_json_encode($confirmMsg);
-            if ($confirmJson === false) {
-              $confirmJson = "'" . esc_js($confirmMsg) . "'";
-            }
+            $confirmText = esc_js($confirmMsg);
+            $confirmJs = sprintf("return confirm('%s');", $confirmText);
             $deleteUrl = wp_nonce_url(
               add_query_arg([
                 'action'       => 'osct_delete_job_translation',
@@ -247,7 +245,7 @@ final class JobsPage
               ], admin_url('admin-post.php')),
               'osct_delete_job_translation'
             );
-            echo '<td><a href="' . esc_url($deleteUrl) . '" style="color:#0a0;text-decoration:none;font-weight:bold;" title="' . esc_attr(sprintf('Übersetzung %s löschen', strtoupper($lang))) . '" onclick="return confirm(' . $confirmJson . ');">✓</a></td>';
+            echo '<td><a href="' . esc_url($deleteUrl) . '" style="color:#0a0;text-decoration:none;font-weight:bold;" title="' . esc_attr(sprintf('Übersetzung %s löschen', strtoupper($lang))) . '" onclick="' . esc_attr($confirmJs) . '">✓</a></td>';
           } else {
             echo '<td><span style="color:#a00">–</span></td>';
           }
