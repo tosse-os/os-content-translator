@@ -16,7 +16,11 @@ final class JobsLogger
 
   private function rid(): string
   {
-    return $this->runId ?: wp_generate_uuid4();
+    if ($this->runId === '') {
+      $this->runId = wp_generate_uuid4();
+    }
+
+    return $this->runId;
   }
 
   public function batch(array $pickedIds, ?int $limit): void
