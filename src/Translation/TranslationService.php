@@ -43,6 +43,15 @@ final class TranslationService
     {
         $this->runId = $id;
     }
+
+    private function currentRunId(): string
+    {
+        if ($this->runId === '') {
+            $this->runId = wp_generate_uuid4();
+        }
+
+        return $this->runId;
+    }
     public function setForce(bool $on): void
     {
         $this->force = $on;
@@ -275,7 +284,7 @@ final class TranslationService
                 $ccSrc = $this->countChars($contentSrc);
 
                 $this->logs->insert([
-                    'run_id' => $this->runId ?: wp_generate_uuid4(),
+                    'run_id' => $this->currentRunId(),
                     'post_id' => $post_id,
                     'post_type' => $post->post_type,
                     'source_lang' => $source,
@@ -332,7 +341,7 @@ final class TranslationService
                 $ccSrc = $this->countChars($contentSrc);
 
                 $this->logs->insert([
-                    'run_id' => $this->runId ?: wp_generate_uuid4(),
+                    'run_id' => $this->currentRunId(),
                     'post_id' => $post_id,
                     'post_type' => $post->post_type,
                     'source_lang' => $source,
@@ -392,7 +401,7 @@ final class TranslationService
                 $this->hash->setTargetHash($existing, $lang, $srcHash);
 
                 $this->logs->insert([
-                    'run_id' => $this->runId ?: wp_generate_uuid4(),
+                    'run_id' => $this->currentRunId(),
                     'post_id' => $post_id,
                     'post_type' => $post->post_type,
                     'source_lang' => $source,
@@ -441,7 +450,7 @@ final class TranslationService
 
                 if (is_wp_error($newId)) {
                     $this->logs->insert([
-                        'run_id' => $this->runId ?: wp_generate_uuid4(),
+                        'run_id' => $this->currentRunId(),
                         'post_id' => $post_id,
                         'post_type' => $post->post_type,
                         'source_lang' => $source,
@@ -485,7 +494,7 @@ final class TranslationService
                 $this->hash->setTargetHash($newId, $lang, $srcHash);
 
                 $this->logs->insert([
-                    'run_id' => $this->runId ?: wp_generate_uuid4(),
+                    'run_id' => $this->currentRunId(),
                     'post_id' => $post_id,
                     'post_type' => $post->post_type,
                     'source_lang' => $source,

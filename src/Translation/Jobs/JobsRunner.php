@@ -27,6 +27,15 @@ final class JobsRunner
     $this->translator = fn(string $t, string $l, string $s) => $t; // no-op Fallback
   }
 
+  private function currentRunId(): string
+  {
+    if ($this->runId === '') {
+      $this->runId = wp_generate_uuid4();
+    }
+
+    return $this->runId;
+  }
+
   public function setTranslator(callable $fn): void
   {
     $this->translator = $fn;
@@ -66,7 +75,7 @@ final class JobsRunner
     // Batch-Info: welche Jobs laufen in diesem Durchgang?
     $pickedIds = array_map(fn($r) => (string)$r['job_id'], $limited);
     $this->logs->insert([
-      'run_id'         => $this->runId ?: wp_generate_uuid4(),
+      'run_id'         => $this->currentRunId(),
       'post_id'        => 0,
       'post_type'      => 'job',
       'source_lang'    => $source,
@@ -103,7 +112,7 @@ final class JobsRunner
 
       // BEGIN-Log pro Job (damit in „Schritte“ gruppierbar)
       $this->logs->insert([
-        'run_id'         => $this->runId ?: wp_generate_uuid4(),
+        'run_id'         => $this->currentRunId(),
         'post_id'        => 0,
         'post_type'      => 'job',
         'source_lang'    => $source,
@@ -145,7 +154,7 @@ final class JobsRunner
         if ($existing && $stateBefore === 'ok' && !$this->force) {
           $mm = $this->countAll($nameSrc, $val);
           $this->logs->insert([
-            'run_id'         => $this->runId ?: wp_generate_uuid4(),
+            'run_id'         => $this->currentRunId(),
             'post_id'        => 0,
             'post_type'      => 'job',
             'source_lang'    => $source,
@@ -221,7 +230,7 @@ final class JobsRunner
         $action = ($existing ? 'update' : 'create');
 
         $this->logs->insert([
-          'run_id'         => $this->runId ?: wp_generate_uuid4(),
+          'run_id'         => $this->currentRunId(),
           'post_id'        => 0,
           'post_type'      => 'job',
           'source_lang'    => $source,
