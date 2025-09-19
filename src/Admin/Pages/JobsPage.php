@@ -32,9 +32,29 @@ final class JobsPage
     $paged    = isset($_GET['paged']) ? max(1, (int)$_GET['paged']) : 1;
     $perPage  = 50;
 
+    $deletedFlag = isset($_GET['deleted']) ? sanitize_text_field($_GET['deleted']) : '';
+    $deletedJob  = isset($_GET['deleted_job']) ? sanitize_text_field($_GET['deleted_job']) : '';
+    $deletedLang = isset($_GET['deleted_lang']) ? sanitize_text_field($_GET['deleted_lang']) : '';
+
     // „gültige“ Filter-Sprache
     $hasLangFilter = ($filterL !== '' && in_array($filterL, $allTargetLangs, true));
     $columnLangs   = $hasLangFilter ? [$filterL] : $allTargetLangs;
+
+    $redirectArgs = [
+      'page'    => 'osct-jobs',
+      'orderby' => $orderby,
+      'order'   => $order,
+    ];
+    if ($s !== '') {
+      $redirectArgs['s'] = $s;
+    }
+    if ($filterL !== '') {
+      $redirectArgs['lang'] = $filterL;
+    }
+    if ($paged > 1) {
+      $redirectArgs['paged'] = $paged;
+    }
+    $redirectBase = add_query_arg($redirectArgs, admin_url('admin.php'));
 
     // Source-Rows
     $rows = $this->repo->all();
@@ -137,6 +157,16 @@ final class JobsPage
 
     echo '<div class="wrap"><h1>OS Content Translator – Jobs-Übersicht</h1>';
 
+    if ($deletedFlag !== '') {
+      $noticeCls = $deletedFlag === '1' ? 'notice notice-success is-dismissible' : 'notice notice-error';
+      $jobDisplay = $deletedJob !== '' ? esc_html($deletedJob) : '–';
+      $langDisplay = $deletedLang !== '' ? esc_html(strtoupper($deletedLang)) : '–';
+      $message = $deletedFlag === '1'
+        ? sprintf('Übersetzung %1$s für Job %2$s wurde gelöscht.', $langDisplay, $jobDisplay)
+        : 'Übersetzung konnte nicht gelöscht werden.';
+      echo '<div class="' . esc_attr($noticeCls) . '"><p>' . esc_html($message) . '</p></div>';
+    }
+
     // Filterleiste
     echo '<form method="get" action="">';
     echo '<input type="hidden" name="page" value="osct-jobs">';
@@ -198,7 +228,29 @@ final class JobsPage
         echo '<td>' . intval($r['_translated']) . '</td>';
         foreach ($columnLangs as $lang) {
           $ok = !empty($r['_langs'][$lang]['ok']);
-          echo '<td>' . ($ok ? '<span style="color:#0a0">✓</span>' : '<span style="color:#a00">–</span>') . '</td>';
+          if ($ok) {
+            $confirmMsg = sprintf(
+              'Übersetzung %s für Job %s wirklich löschen?',
+              strtoupper($lang),
+              $r['job_id']
+            );
+            $confirmJson = wp_json_encode($confirmMsg);
+            if ($confirmJson === false) {
+              $confirmJson = "'" . esc_js($confirmMsg) . "'";
+            }
+            $deleteUrl = wp_nonce_url(
+              add_query_arg([
+                'action'       => 'osct_delete_job_translation',
+                'job_id'       => $r['job_id'],
+                'lang'         => $lang,
+                'redirect_to'  => $redirectBase,
+              ], admin_url('admin-post.php')),
+              'osct_delete_job_translation'
+            );
+            echo '<td><a href="' . esc_url($deleteUrl) . '" style="color:#0a0;text-decoration:none;font-weight:bold;" title="' . esc_attr(sprintf('Übersetzung %s löschen', strtoupper($lang))) . '" onclick="return confirm(' . $confirmJson . ');">✓</a></td>';
+          } else {
+            echo '<td><span style="color:#a00">–</span></td>';
+          }
         }
         $lu = $r['_updated_at'] ?? '';
         // updated_at ist in GMT gespeichert (current_time('mysql', 1)); hübsch formatieren

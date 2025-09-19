@@ -49,6 +49,26 @@ final class JobsRepo
     return $rows ?: [];
   }
 
+  public function deleteTranslation(string $jobId, string $lang): bool
+  {
+    global $wpdb;
+    if ($jobId === '' || $lang === '') return false;
+
+    $deleted = $wpdb->delete(
+      $this->i18nTable,
+      [
+        'job_id' => $jobId,
+        'lang'   => $lang,
+      ],
+      [
+        '%s',
+        '%s',
+      ]
+    );
+
+    return (bool)$deleted;
+  }
+
   public function upsert(
     string $jobId,
     string $lang,
