@@ -129,8 +129,13 @@ final class Hooks
             'jobs_limit'  => $jobsLimit > 0 ? $jobsLimit : null,
         ];
 
+        $argsKey = 'osct_run_args_' . $runId;
+        $expiry  = defined('MINUTE_IN_SECONDS') ? 15 * MINUTE_IN_SECONDS : 900;
+        set_transient($argsKey, $what, $expiry);
+
         if (!empty($what['test'])) {
             $this->cronTranslate($runId, $force, $what);
+            delete_transient($argsKey);
             wp_redirect(add_query_arg(['page' => 'osct-dashboard'], admin_url('admin.php')));
             exit;
         }
@@ -153,6 +158,15 @@ final class Hooks
 
     public function cronTranslate(string $runId, bool $force, ?array $what = null): void
     {
+        $argsKey = 'osct_run_args_' . $runId;
+        if (!is_array($what) || empty($what)) {
+            $stored = get_transient($argsKey);
+            if (is_array($stored)) {
+                $what = $stored;
+            }
+        }
+        delete_transient($argsKey);
+
         $this->translator->setRunId($runId);
         $this->translator->setForce($force);
 
