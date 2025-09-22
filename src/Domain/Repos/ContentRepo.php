@@ -3,9 +3,16 @@ namespace OSCT\Domain\Repos;
 if (!defined('ABSPATH')) exit;
 
 final class ContentRepo {
-    public function menus(): array {
+    public function menus(?string $onlyLang = null): array {
         $menus = wp_get_nav_menus(); $out=[];
-        foreach ($menus as $m) $out[(int)$m->term_id]=$m->name;
+        foreach ($menus as $m) {
+            $id = (int)$m->term_id;
+            if ($onlyLang) {
+                $lang = $this->menuLanguage($id);
+                if ($lang !== null && $lang !== $onlyLang) continue;
+            }
+            $out[$id] = $m->name;
+        }
         return $out;
     }
     public function menuName(int $id): string {
@@ -30,6 +37,14 @@ final class ContentRepo {
         $q = new \WP_Query(['post_type'=>'wp_block','post_status'=>'publish','posts_per_page'=>-1,'orderby'=>'title','order'=>'ASC','fields'=>'ids']);
         $out=[]; foreach ($q->posts as $id) $out[(int)$id]=get_the_title($id);
         return $out;
+    }
+    public function menuLanguage(int $menuId): ?string {
+        if (function_exists('pll_get_term_language')) {
+            $lang = pll_get_term_language($menuId);
+            if (is_object($lang) && isset($lang->slug)) return (string)$lang->slug;
+            if (is_string($lang) && $lang !== '') return $lang;
+        }
+        return null;
     }
     /** @return \WP_Post[] */
     public function getPostsByIds(array $ids, string $type): array {

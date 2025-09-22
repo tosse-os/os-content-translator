@@ -137,19 +137,6 @@ final class TranslationService
         return ($tgtH && $tgtH === $src) ? 'ok' : 'stale';
     }
 
-    public function dryRun(): array
-    {
-        [$ids, $blocks] = $this->whitelists();
-        $targets = (array)$this->opt->get('languages_active', []);
-        $res = [];
-        foreach (array_merge($ids, $blocks) as $id) {
-            $row = ['id' => $id, 'type' => get_post_type($id), 'title' => get_the_title($id)];
-            foreach ($targets as $l) $row[$l] = $this->state($id, $l);
-            $res[] = $row;
-        }
-        return $res;
-    }
-
     public function translateRun(?array $onlyIds = null, ?array $what = null): array
     {
         $what = array_merge([

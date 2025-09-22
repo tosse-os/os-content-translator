@@ -33,8 +33,23 @@ final class DebugPage
             ARRAY_A
         );
 
-        $started = $rows ? $rows[0]['created_at'] : '–';
-        $ended   = $rows ? $rows[count($rows) - 1]['created_at'] : '–';
+        $started = $rows ? $rows[0]['created_at'] : '';
+        $ended   = $rows ? $rows[count($rows) - 1]['created_at'] : '';
+
+        $dateFormat = trim((string)get_option('date_format'));
+        $timeFormat = trim((string)get_option('time_format'));
+        $displayFormat = trim($dateFormat . ' ' . $timeFormat);
+        if ($displayFormat === '') {
+            $displayFormat = 'Y-m-d H:i:s';
+        }
+
+        $localize = static function (?string $utc, string $format): string {
+            if (!$utc) {
+                return '–';
+            }
+            $localized = get_date_from_gmt($utc, $format);
+            return $localized ?: $utc;
+        };
 
         $sumWords = 0;
         $sumChars = 0;
@@ -46,8 +61,8 @@ final class DebugPage
         $jobSum = $this->logs->lastRunJobSummary();
 
         echo '<p><strong>Run-ID:</strong> ' . esc_html($runId) . ' &nbsp; ';
-        echo '<strong>Start:</strong> ' . esc_html($started) . ' &nbsp; ';
-        echo '<strong>Ende:</strong> ' . esc_html($ended) . '</p>';
+        echo '<strong>Start:</strong> ' . esc_html($localize($started, $displayFormat)) . ' &nbsp; ';
+        echo '<strong>Ende:</strong> ' . esc_html($localize($ended, $displayFormat)) . '</p>';
 
         echo '<p><strong>Gesamt Wörter:</strong> ' . intval($sumWords) .
             ' &nbsp; <strong>Gesamt Zeichen:</strong> ' . intval($sumChars) . '</p>';
@@ -83,17 +98,19 @@ final class DebugPage
 
             // JobID aus message extrahieren: [job <id>] oder job_id=<id>
             $jobId = '';
-            if (preg_match('/\\[job\\s+([^\\]]+)\\]/i', (string)$r['message'], $m)) {
-                $jobId = $m[1];
-            } elseif (preg_match('/\\bjob_id=([a-f0-9\\-]{8,})/i', (string)$r['message'], $m)) {
-                $jobId = $m[1];
+            $message = (string)$r['message'];
+            if (preg_match('/\\[job\\s+([^\\]\\s]+)\\]/i', $message, $m)) {
+                $jobId = trim($m[1]);
+            } elseif (preg_match('/\\bjob_id=([a-z0-9\\-]+)/i', $message, $m)) {
+                $jobId = trim($m[1]);
             }
 
             $words  = (int)$r['words_title'] + (int)$r['words_content'];
             $chars  = (int)$r['chars_title'] + (int)$r['chars_content'];
+            $tsLocal = $localize($r['created_at'], $displayFormat);
 
             echo '<tr>';
-            echo '<td>' . esc_html($r['created_at']) . '</td>';
+            echo '<td>' . esc_html($tsLocal) . '</td>';
             echo '<td>' . esc_html($postLabel) . '</td>';
             echo '<td>' . esc_html($jobId ?: '–') . '</td>';
             echo '<td>' . esc_html($type) . '</td>';
