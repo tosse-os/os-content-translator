@@ -195,6 +195,8 @@ final class TranslationService
             // Testlauf → nur 2 Stellenanzeigen
             if (!empty($what['test'])) {
                 $jr->setLimit(2);
+            } elseif (!empty($what['jobs_limit'])) {
+                $jr->setLimit((int)$what['jobs_limit']);
             }
 
             if (defined('OSCT_TEST_JOB_ID') && OSCT_TEST_JOB_ID) {

@@ -107,6 +107,14 @@ final class DashboardPage
         echo '<input type="hidden" name="action" value="osct_do_translate">';
         wp_nonce_field('osct_do_translate');
         echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_test" value="1" checked> Testlauf</label></p>';
+        echo '<p style="margin-bottom:8px">Stellenanzeigen-Limit: <select name="osct_jobs_limit">'
+            . '<option value="0" selected>Alle offenen Stellen</option>'
+            . '<option value="10">Erste 10</option>'
+            . '<option value="50">Erste 50</option>'
+            . '<option value="100">Erste 100</option>'
+            . '<option value="250">Erste 250</option>'
+            . '<option value="500">Erste 500</option>'
+            . '</select></p>';
         echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_jobs" value="1"> Stellenanzeigen</label></p>';
         echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_menu_pages" value="1"> Seiten im gewählten Menü</label></p>';
         echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_extra_pages" value="1"> Standardseiten</label></p>';
