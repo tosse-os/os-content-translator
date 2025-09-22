@@ -145,6 +145,7 @@ final class TranslationService
             'blocks'     => true,
             'jobs'       => true,
             'test'       => false,
+            'jobs_limit' => null,
         ], is_array($what) ? $what : []);
 
         $o = $this->opt->all();
