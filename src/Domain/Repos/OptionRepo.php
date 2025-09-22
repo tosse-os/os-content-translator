@@ -12,7 +12,6 @@ final class OptionRepo {
         'api_deepl'           => '',
         'languages_active'    => [],
         'menu_id'             => 0,
-        'menu_page_whitelists'=> [],
         'page_whitelist'      => [],
         'page_whitelist_extra'=> [],
         'block_whitelist'     => [],

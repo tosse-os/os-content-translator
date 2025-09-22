@@ -3,33 +3,9 @@ namespace OSCT\Domain\Repos;
 if (!defined('ABSPATH')) exit;
 
 final class ContentRepo {
-    public function menus(?string $lang = null): array {
-        $menus = wp_get_nav_menus();
-        $out   = [];
-
-        foreach ($menus as $m) {
-            $menuLang = null;
-            if ($lang !== null && function_exists('pll_get_term_language')) {
-                $res = pll_get_term_language((int)$m->term_id, 'slug');
-                if (is_array($res)) {
-                    if (isset($res['slug']) && is_string($res['slug'])) {
-                        $menuLang = $res['slug'];
-                    } else {
-                        $first = reset($res);
-                        $menuLang = is_string($first) ? $first : null;
-                    }
-                } elseif (is_string($res)) {
-                    $menuLang = $res;
-                }
-            }
-
-            if ($lang !== null && $menuLang !== null && $menuLang !== '' && $menuLang !== $lang) {
-                continue;
-            }
-
-            $out[(int)$m->term_id] = $m->name;
-        }
-
+    public function menus(): array {
+        $menus = wp_get_nav_menus(); $out=[];
+        foreach ($menus as $m) $out[(int)$m->term_id]=$m->name;
         return $out;
     }
     public function menuName(int $id): string {

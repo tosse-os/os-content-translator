@@ -16,13 +16,8 @@ final class SettingsPage {
     public function render(): void {
         $o          = $this->opt->all();
         $languages  = $this->langs->all();
-        $sourceLang = $this->langs->default();
-        $sourceLangLabel = $sourceLang !== '' ? $sourceLang : '–';
-        $menus      = $this->content->menus($sourceLang);
-        $currentMenuId = (int)($o['menu_id'] ?? 0);
-        $menuSelections = (array)($o['menu_page_whitelists'] ?? []);
-        $menuPages  = $this->content->menuPages($currentMenuId);
-        $currentMenuWhitelist = array_map('intval', (array)($menuSelections[$currentMenuId] ?? []));
+        $menus      = $this->content->menus();
+        $menuPages  = $this->content->menuPages($o['menu_id'] ?? 0);
         $extraPages = $this->content->allPagesExcluding(array_keys($menuPages));
         $blocks     = $this->content->allBlocks();
 
@@ -70,18 +65,15 @@ final class SettingsPage {
         echo '</tbody></table>';
 
         // Menü-gebundene Auswahl
-        echo '<h2>Menü-gebundene Seitenauswahl</h2>';
-        echo '<p>Es werden nur Menüs der Standardsprache (Quelle: ' . esc_html($sourceLangLabel) . ') angezeigt.</p>';
-        echo '<table class="form-table"><tbody>';
+        echo '<h2>Menü-gebundene Seitenauswahl</h2><table class="form-table"><tbody>';
         echo '<tr><th>Menü auswählen</th><td><select name="menu_id"><option value="0">– bitte wählen –</option>';
-        foreach ($menus as $id=>$name) {
-            echo '<option value="'.(int)$id.'" '.selected($currentMenuId,(int)$id,false).'>'.esc_html($name).' (#'.(int)$id.')</option>';
-        }
+        foreach ($menus as $id=>$name) echo '<option value="'.(int)$id.'" '.selected((int)($o['menu_id']??0),(int)$id,false).'>'.esc_html($name).' (#'.(int)$id.')</option>';
         echo '</select> <button class="button" name="reload" value="1">Neu laden</button></td></tr>';
         echo '<tr><th>Seiten im gewählten Menü</th><td>';
+        $wlMenu = (array)($o['page_whitelist'] ?? []);
         if (!empty($menuPages)) {
             foreach ($menuPages as $pid=>$title) {
-                $ch = in_array($pid,$currentMenuWhitelist,true)?'checked':'';
+                $ch = in_array($pid,$wlMenu,true)?'checked':'';
                 echo '<label style="display:block;margin:4px 0"><input type="checkbox" name="page_whitelist[]" value="'.(int)$pid.'" '.$ch.'> '.esc_html($title).' (#'.(int)$pid.')</label>';
             }
         } else echo '<em>Bitte oben ein Menü wählen.</em>';
@@ -127,21 +119,8 @@ final class SettingsPage {
         $o['api_google']          = sanitize_text_field($in['api_google'] ?? '');
         $o['api_deepl']           = sanitize_text_field($in['api_deepl'] ?? '');
         $o['languages_active']    = isset($in['languages_active']) ? array_values(array_map('sanitize_text_field',(array)$in['languages_active'])) : [];
-
-        $previousMenuId = (int)($o['menu_id'] ?? 0);
-        $menuId = isset($in['menu_id']) ? (int)$in['menu_id'] : 0;
-        $menuWhitelist = isset($in['page_whitelist']) ? array_values(array_unique(array_map('intval',(array)$in['page_whitelist']))) : [];
-        $storedMenus = isset($o['menu_page_whitelists']) && is_array($o['menu_page_whitelists']) ? $o['menu_page_whitelists'] : [];
-        if ($previousMenuId > 0) {
-            $storedMenus[$previousMenuId] = $menuWhitelist;
-        }
-        if (isset($storedMenus[0])) {
-            unset($storedMenus[0]);
-        }
-        $o['menu_page_whitelists'] = $storedMenus;
-        $o['menu_id'] = $menuId;
-        $activeMenuWhitelist = $menuId > 0 ? ($storedMenus[$menuId] ?? []) : [];
-        $o['page_whitelist'] = array_values(array_unique(array_map('intval', (array)$activeMenuWhitelist)));
+        $o['menu_id']             = isset($in['menu_id']) ? (int)$in['menu_id'] : 0;
+        $o['page_whitelist']      = isset($in['page_whitelist']) ? array_values(array_unique(array_map('intval',(array)$in['page_whitelist']))) : [];
         $o['page_whitelist_extra']= isset($in['page_whitelist_extra']) ? array_values(array_unique(array_map('intval',(array)$in['page_whitelist_extra']))) : [];
         $o['block_whitelist']     = isset($in['block_whitelist']) ? array_values(array_unique(array_map('intval',(array)$in['block_whitelist']))) : [];
         $o['slug_translate']      = !empty($in['slug_translate']) ? 1 : 0;

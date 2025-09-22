@@ -5,6 +5,7 @@ namespace OSCT\Core;
 use OSCT\Admin\Menu;
 use OSCT\Admin\Pages\DashboardPage;
 use OSCT\Admin\Pages\SettingsPage;
+use OSCT\Admin\Pages\DryRunPage;
 use OSCT\Admin\Pages\LogPage;
 use OSCT\Admin\Pages\DebugPage;
 use OSCT\Domain\Repos\OptionRepo;
@@ -45,6 +46,7 @@ final class Hooks
         add_action('admin_menu', [$this, 'adminMenu']);
         add_action('admin_post_osct_save_settings', [$this, 'handleSaveSettings']);
         add_action('admin_post_osct_do_translate',  [$this, 'handleTranslate']);
+        add_action('admin_post_osct_do_dry_run',     [$this, 'handleDryRun']);
         add_action('admin_post_osct_delete_job_translation', [$this, 'handleDeleteJobTranslation']);
 
         (new BlockSyncService())->register();
@@ -91,6 +93,7 @@ final class Hooks
         (new Menu(
             new DashboardPage($this->options, $this->langs, $this->content, $this->translator, new JobsRepo()),
             new SettingsPage($this->options, $this->langs, $this->content),
+            new DryRunPage($this->options, $this->langs, $this->content, $this->translator),
             new LogPage($this->logs),
             new DebugPage(),
             new JobsPage($this->options, $this->langs, new JobsRepo()) // ← wichtig
@@ -161,6 +164,16 @@ final class Hooks
 
         \OSCT\Core\Debug::finish($res);
         set_transient('osct_translate_result', $res, 300);
+    }
+
+    public function handleDryRun(): void
+    {
+        if (!current_user_can('manage_options')) wp_die();
+        check_admin_referer('osct_do_dry_run');
+        $res = $this->translator->dryRun();
+        set_transient('osct_dry_result', $res, 120);
+        wp_redirect(add_query_arg(['page' => 'osct-dry-run'], admin_url('admin.php')));
+        exit;
     }
 
     public function handleDeleteJobTranslation(): void
