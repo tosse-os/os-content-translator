@@ -59,6 +59,7 @@ final class DebugPage
         }
 
         $jobSum = $this->logs->lastRunJobSummary();
+        $jobRows = $this->logs->lastRunJobEntries();
 
         echo '<p><strong>Run-ID:</strong> ' . esc_html($runId) . ' &nbsp; ';
         echo '<strong>Start:</strong> ' . esc_html($localize($started, $displayFormat)) . ' &nbsp; ';
@@ -73,6 +74,43 @@ final class DebugPage
         echo '<tr><td>Wörter</td><td>' . intval($jobSum['words'] ?? 0) . '</td></tr>';
         echo '<tr><td>Zeichen</td><td>' . intval($jobSum['chars'] ?? 0) . '</td></tr>';
         echo '</tbody></table>';
+
+        echo '<h3>Stellenangebote – Details</h3>';
+        if (empty($jobRows)) {
+            echo '<p>Keine Stellenanzeigen in diesem Lauf.</p>';
+        } else {
+            echo '<table class="widefat striped"><thead><tr>';
+            echo '<th>Zeit</th>';
+            echo '<th>Job-ID</th>';
+            echo '<th>Quelle→Ziel</th>';
+            echo '<th>Aktion</th>';
+            echo '<th>Status</th>';
+            echo '<th>Provider</th>';
+            echo '<th>Wörter</th>';
+            echo '<th>Zeichen</th>';
+            echo '<th>Nachricht</th>';
+            echo '</tr></thead><tbody>';
+            foreach ($jobRows as $row) {
+                $tsLocal = $localize($row['created_at'], $displayFormat);
+                $words = (int)$row['words_total'];
+                $chars = (int)$row['chars_total'];
+                $source = (string)($row['source_lang'] ?? '');
+                $target = (string)($row['target_lang'] ?? '');
+                $jobId = $row['job_id'] !== '' ? $row['job_id'] : '–';
+                echo '<tr>';
+                echo '<td>' . esc_html($tsLocal) . '</td>';
+                echo '<td>' . esc_html($jobId) . '</td>';
+                echo '<td>' . esc_html($source . ' → ' . $target) . '</td>';
+                echo '<td>' . esc_html($row['action']) . '</td>';
+                echo '<td>' . esc_html($row['status']) . '</td>';
+                echo '<td>' . esc_html($row['provider']) . '</td>';
+                echo '<td>' . esc_html($words) . '</td>';
+                echo '<td>' . esc_html($chars) . '</td>';
+                echo '<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis">' . esc_html($row['message']) . '</td>';
+                echo '</tr>';
+            }
+            echo '</tbody></table>';
+        }
 
         echo '<h2>Schritte</h2>';
         echo '<table class="widefat striped"><thead><tr>';

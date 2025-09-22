@@ -41,7 +41,37 @@ final class LogPage {
         echo '<p><strong>Summen</strong>: Einträge '.(int)$sums['entries'].', Wörter '.(int)$sums['words'].', Zeichen '.(int)$sums['chars'].'</p>';
 
         $last = $this->repo->lastRunJobSummary();
-        echo '<p><strong>Letzter Lauf – Stellenanzeigen:</strong> Übersetzt ' . (int)$last['entries'] . ' Einträge, Wörter ' . (int)$last['words'] . ', Zeichen ' . (int)$last['chars'] . '.</p>';
+        $lastRows = $this->repo->lastRunJobEntries();
+        echo '<h2>Letzter Lauf – Stellenanzeigen</h2>';
+        echo '<p><strong>Summen:</strong> Übersetzt ' . (int)$last['entries'] . ' Einträge, Wörter ' . (int)$last['words'] . ', Zeichen ' . (int)$last['chars'] . '.</p>';
+
+        if (!empty($lastRows)) {
+            echo '<table class="widefat striped"><thead><tr>';
+            echo '<th>Zeit</th><th>Job-ID</th><th>Quelle→Ziel</th><th>Provider</th><th>Aktion</th><th>Status</th><th>Wörter</th><th>Zeichen</th><th>Message</th>';
+            echo '</tr></thead><tbody>';
+            foreach ($lastRows as $row) {
+                $words = (int)$row['words_total'];
+                $chars = (int)$row['chars_total'];
+                $jobId = $row['job_id'] !== '' ? $row['job_id'] : '–';
+                $source = (string)($row['source_lang'] ?? '');
+                $target = (string)($row['target_lang'] ?? '');
+                $ts = esc_html(get_date_from_gmt($row['created_at'], 'Y-m-d H:i:s'));
+                echo '<tr>';
+                echo '<td>' . $ts . '</td>';
+                echo '<td>' . esc_html($jobId) . '</td>';
+                echo '<td>' . esc_html($source . ' → ' . $target) . '</td>';
+                echo '<td>' . esc_html($row['provider']) . '</td>';
+                echo '<td>' . esc_html($row['action']) . '</td>';
+                echo '<td>' . esc_html($row['status']) . '</td>';
+                echo '<td>' . esc_html($words) . '</td>';
+                echo '<td>' . esc_html($chars) . '</td>';
+                echo '<td>' . esc_html($row['message']) . '</td>';
+                echo '</tr>';
+            }
+            echo '</tbody></table>';
+        } else {
+            echo '<p>Keine Stellenanzeigen im letzten Lauf.</p>';
+        }
 
         echo '<table class="widefat striped"><thead><tr>';
         echo '<th>ID</th><th>Zeit</th><th>Post</th><th>Typ</th><th>Sprache</th><th>Provider</th><th>Aktion</th><th>Status</th><th>Wörter</th><th>Zeichen</th><th>Message</th>';
