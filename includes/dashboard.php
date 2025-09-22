@@ -73,15 +73,6 @@ function osct_render_dashboard() {
     echo '<tr><td>Aktive Zielsprachen</td><td>'.esc_html(implode(', ', $active)).'</td></tr>';
     echo '</tbody></table>';
 
-    echo '<h2>Schneller Trockenlauf</h2>';
-    echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'">';
-    echo '<input type="hidden" name="action" value="osct_do_dry_run">';
-    wp_nonce_field('osct_do_dry_run');
-    echo '<p>Führt einen Trockenlauf für alle freigegebenen Seiten und Blöcke in die aktiven Zielsprachen aus, ohne Inhalte anzulegen.</p>';
-    echo '<p><a class="button button-secondary" href="'.esc_url(add_query_arg(['page'=>'osct-dry-run'], admin_url('admin.php'))).'">Erweiterter Trockenlauf</a> ';
-    echo '<button class="button button-primary">Trockenlauf starten</button></p>';
-    echo '</form>';
-
     echo '<h2>Übersetzung starten</h2>';
     echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'">';
     echo '<input type="hidden" name="action" value="osct_do_translate">';

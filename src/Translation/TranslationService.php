@@ -137,19 +137,6 @@ final class TranslationService
         return ($tgtH && $tgtH === $src) ? 'ok' : 'stale';
     }
 
-    public function dryRun(): array
-    {
-        [$ids, $blocks] = $this->whitelists();
-        $targets = (array)$this->opt->get('languages_active', []);
-        $res = [];
-        foreach (array_merge($ids, $blocks) as $id) {
-            $row = ['id' => $id, 'type' => get_post_type($id), 'title' => get_the_title($id)];
-            foreach ($targets as $l) $row[$l] = $this->state($id, $l);
-            $res[] = $row;
-        }
-        return $res;
-    }
-
     public function translateRun(?array $onlyIds = null, ?array $what = null): array
     {
         $what = array_merge([
@@ -552,14 +539,6 @@ final class TranslationService
             if (strpos($k, '_edit_lock') === 0 || strpos($k, '_edit_last') === 0) continue;
             foreach ($vals as $v) add_post_meta($dst, $k, maybe_unserialize($v));
         }
-    }
-
-    private function whitelists(): array
-    {
-        $o = $this->opt->all();
-        $ids    = array_values(array_unique(array_map('intval', array_merge((array)$o['page_whitelist'], (array)$o['page_whitelist_extra']))));
-        $blocks = array_values(array_unique(array_map('intval', (array)$o['block_whitelist'])));
-        return [$ids, $blocks];
     }
 
     private function countWords(string $html): int

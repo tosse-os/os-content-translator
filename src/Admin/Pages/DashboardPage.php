@@ -102,13 +102,6 @@ final class DashboardPage
             echo '</tbody></table>';
         }
 
-        echo '<h2>Schneller Trockenlauf</h2>';
-        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
-        echo '<input type="hidden" name="action" value="osct_do_dry_run">';
-        wp_nonce_field('osct_do_dry_run');
-        echo '<p><button class="button button-primary">Trockenlauf starten</button> ';
-        echo '<a class="button" href="' . esc_url(add_query_arg(['page' => 'osct-settings'], admin_url('admin.php'))) . '">Einstellungen</a></p></form>';
-
         echo '<h2>Übersetzung starten</h2>';
         echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
         echo '<input type="hidden" name="action" value="osct_do_translate">';

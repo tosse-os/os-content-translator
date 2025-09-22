@@ -15,6 +15,44 @@ final class DebugPage
         $this->logs = new LogRepo();
     }
 
+    private function extractJobId(string $message): string
+    {
+        $message = (string)$message;
+
+        if (preg_match('/\bjob_id=([^\s;,\]\)]+)/i', $message, $m)) {
+            return trim($m[1]);
+        }
+
+        if (preg_match('/\[job\s+([^\]]+)\]/i', $message, $m)) {
+            return trim($m[1]);
+        }
+
+        return '';
+    }
+
+    private function formatTimestamp(?string $ts): string
+    {
+        $ts = (string)$ts;
+        if ($ts === '' || $ts === '0000-00-00 00:00:00') {
+            return '–';
+        }
+
+        if (function_exists('get_date_from_gmt')) {
+            $fmtDate = (string)get_option('date_format');
+            $fmtTime = (string)get_option('time_format');
+            $fmt = trim($fmtDate . ' ' . $fmtTime);
+            if ($fmt === '') {
+                $fmt = 'Y-m-d H:i:s';
+            }
+            $local = get_date_from_gmt($ts, $fmt);
+            if ($local) {
+                return $local;
+            }
+        }
+
+        return $ts;
+    }
+
     public function render(): void
     {
         global $wpdb;
@@ -33,8 +71,8 @@ final class DebugPage
             ARRAY_A
         );
 
-        $started = $rows ? $rows[0]['created_at'] : '–';
-        $ended   = $rows ? $rows[count($rows) - 1]['created_at'] : '–';
+        $started = $rows ? $rows[0]['created_at'] : null;
+        $ended   = $rows ? $rows[count($rows) - 1]['created_at'] : null;
 
         $sumWords = 0;
         $sumChars = 0;
@@ -46,8 +84,8 @@ final class DebugPage
         $jobSum = $this->logs->lastRunJobSummary();
 
         echo '<p><strong>Run-ID:</strong> ' . esc_html($runId) . ' &nbsp; ';
-        echo '<strong>Start:</strong> ' . esc_html($started) . ' &nbsp; ';
-        echo '<strong>Ende:</strong> ' . esc_html($ended) . '</p>';
+        echo '<strong>Start:</strong> ' . esc_html($this->formatTimestamp($started)) . ' &nbsp; ';
+        echo '<strong>Ende:</strong> ' . esc_html($this->formatTimestamp($ended)) . '</p>';
 
         echo '<p><strong>Gesamt Wörter:</strong> ' . intval($sumWords) .
             ' &nbsp; <strong>Gesamt Zeichen:</strong> ' . intval($sumChars) . '</p>';
@@ -82,18 +120,13 @@ final class DebugPage
             $postLabel = ($postId === 0 && $type === 'job') ? '–' : ('#' . $postId);
 
             // JobID aus message extrahieren: [job <id>] oder job_id=<id>
-            $jobId = '';
-            if (preg_match('/\\[job\\s+([^\\]]+)\\]/i', (string)$r['message'], $m)) {
-                $jobId = $m[1];
-            } elseif (preg_match('/\\bjob_id=([a-f0-9\\-]{8,})/i', (string)$r['message'], $m)) {
-                $jobId = $m[1];
-            }
+            $jobId = $this->extractJobId((string)$r['message']);
 
             $words  = (int)$r['words_title'] + (int)$r['words_content'];
             $chars  = (int)$r['chars_title'] + (int)$r['chars_content'];
 
             echo '<tr>';
-            echo '<td>' . esc_html($r['created_at']) . '</td>';
+            echo '<td>' . esc_html($this->formatTimestamp($r['created_at'])) . '</td>';
             echo '<td>' . esc_html($postLabel) . '</td>';
             echo '<td>' . esc_html($jobId ?: '–') . '</td>';
             echo '<td>' . esc_html($type) . '</td>';
