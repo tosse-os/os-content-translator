@@ -13,6 +13,7 @@ final class OptionRepo {
         'languages_active'    => [],
         'menu_id'             => 0,
         'page_whitelist'      => [],
+        'menu_whitelist_map'  => [],
         'page_whitelist_extra'=> [],
         'block_whitelist'     => [],
         'slug_translate'      => 0,

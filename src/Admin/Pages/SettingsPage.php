@@ -16,10 +16,16 @@ final class SettingsPage {
     public function render(): void {
         $o          = $this->opt->all();
         $languages  = $this->langs->all();
-        $menus      = $this->content->menus();
-        $menuPages  = $this->content->menuPages($o['menu_id'] ?? 0);
+        $menuId     = (int)($o['menu_id'] ?? 0);
+        $menus      = $this->content->menus($this->langs->default());
+        $menuPages  = $this->content->menuPages($menuId);
         $extraPages = $this->content->allPagesExcluding(array_keys($menuPages));
         $blocks     = $this->content->allBlocks();
+        $menuMap    = (array)($o['menu_whitelist_map'] ?? []);
+        if ($menuId > 0 && empty($menuMap[$menuId]) && !empty($o['page_whitelist'])) {
+            $menuMap[$menuId] = array_map('intval', (array)$o['page_whitelist']);
+        }
+        $wlMenu = array_map('intval', (array)($menuMap[$menuId] ?? ($o['page_whitelist'] ?? [])));
 
         echo '<div class="wrap"><h1>OS Content Translator – Einstellungen</h1>';
         if (isset($_GET['updated'])) echo '<div class="notice notice-success is-dismissible"><p>Einstellungen gespeichert.</p></div>';
@@ -67,10 +73,11 @@ final class SettingsPage {
         // Menü-gebundene Auswahl
         echo '<h2>Menü-gebundene Seitenauswahl</h2><table class="form-table"><tbody>';
         echo '<tr><th>Menü auswählen</th><td><select name="menu_id"><option value="0">– bitte wählen –</option>';
-        foreach ($menus as $id=>$name) echo '<option value="'.(int)$id.'" '.selected((int)($o['menu_id']??0),(int)$id,false).'>'.esc_html($name).' (#'.(int)$id.')</option>';
-        echo '</select> <button class="button" name="reload" value="1">Neu laden</button></td></tr>';
+        foreach ($menus as $id=>$name) echo '<option value="'.(int)$id.'" '.selected($menuId,(int)$id,false).'>'.esc_html($name).' (#'.(int)$id.')</option>';
+        echo '</select> <button class="button" name="reload" value="1">Neu laden</button>';
+        echo '<input type="hidden" name="menu_id_prev" value="'.(int)$menuId.'">';
+        echo '</td></tr>';
         echo '<tr><th>Seiten im gewählten Menü</th><td>';
-        $wlMenu = (array)($o['page_whitelist'] ?? []);
         if (!empty($menuPages)) {
             foreach ($menuPages as $pid=>$title) {
                 $ch = in_array($pid,$wlMenu,true)?'checked':'';
@@ -119,8 +126,27 @@ final class SettingsPage {
         $o['api_google']          = sanitize_text_field($in['api_google'] ?? '');
         $o['api_deepl']           = sanitize_text_field($in['api_deepl'] ?? '');
         $o['languages_active']    = isset($in['languages_active']) ? array_values(array_map('sanitize_text_field',(array)$in['languages_active'])) : [];
-        $o['menu_id']             = isset($in['menu_id']) ? (int)$in['menu_id'] : 0;
-        $o['page_whitelist']      = isset($in['page_whitelist']) ? array_values(array_unique(array_map('intval',(array)$in['page_whitelist']))) : [];
+
+        $menuId       = isset($in['menu_id']) ? (int)$in['menu_id'] : 0;
+        $menuIdPrev   = isset($in['menu_id_prev']) ? (int)$in['menu_id_prev'] : $menuId;
+        $wlMenuPosted = isset($in['page_whitelist']) ? array_values(array_unique(array_map('intval',(array)$in['page_whitelist']))) : [];
+
+        $mapRaw = isset($o['menu_whitelist_map']) && is_array($o['menu_whitelist_map']) ? $o['menu_whitelist_map'] : [];
+        $menuMap = [];
+        foreach ($mapRaw as $mid => $list) {
+            $menuMap[(int)$mid] = array_values(array_unique(array_map('intval', (array)$list)));
+        }
+
+        if ($menuIdPrev > 0) {
+            $menuMap[$menuIdPrev] = $wlMenuPosted;
+        }
+
+        $o['menu_id'] = $menuId;
+        $o['menu_whitelist_map'] = $menuMap;
+        $o['page_whitelist'] = $menuId > 0
+            ? array_values(array_unique(array_map('intval', (array)($menuMap[$menuId] ?? []))))
+            : [];
+
         $o['page_whitelist_extra']= isset($in['page_whitelist_extra']) ? array_values(array_unique(array_map('intval',(array)$in['page_whitelist_extra']))) : [];
         $o['block_whitelist']     = isset($in['block_whitelist']) ? array_values(array_unique(array_map('intval',(array)$in['block_whitelist']))) : [];
         $o['slug_translate']      = !empty($in['slug_translate']) ? 1 : 0;
