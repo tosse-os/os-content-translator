@@ -70,7 +70,40 @@ final class JobsRunner
     // deterministische Reihenfolge
     usort($rows, fn($a, $b) => strnatcmp((string)$a['job_id'], (string)$b['job_id']));
 
-    $limited = ($this->limit !== null) ? array_slice($rows, 0, $this->limit) : $rows;
+    $limited = $rows;
+    if ($this->limit !== null) {
+      $limited = [];
+
+      foreach ($rows as $r) {
+        if (count($limited) >= $this->limit) break;
+
+        $needsTranslation = $this->force;
+
+        if (!$needsTranslation) {
+          $jobId   = (string)$r['job_id'];
+          $nameSrc = (string)$r['job_name'];
+          $val     = maybe_unserialize($r['job_value']);
+          if (!is_array($val)) $val = [];
+
+          $srcHash = $this->srcHash($nameSrc, $val);
+
+          foreach ($targets as $lang) {
+            if ($lang === $source) continue;
+
+            $existing = $this->repo->getTranslation($jobId, $lang);
+
+            if (!$existing || empty($existing['src_hash']) || $existing['src_hash'] !== $srcHash) {
+              $needsTranslation = true;
+              break;
+            }
+          }
+        }
+
+        if ($needsTranslation) {
+          $limited[] = $r;
+        }
+      }
+    }
 
     // Batch-Info: welche Jobs laufen in diesem Durchgang?
     $pickedIds = array_map(fn($r) => (string)$r['job_id'], $limited);
