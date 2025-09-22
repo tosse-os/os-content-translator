@@ -113,6 +113,10 @@ final class Hooks
         $force = !empty($_POST['osct_force']);
         $runId = wp_generate_uuid4();
 
+        $limitRaw = isset($_POST['osct_jobs_limit']) ? (int)$_POST['osct_jobs_limit'] : 0;
+        $validLimits = [0, 10, 50, 100, 250, 500];
+        $jobsLimit = in_array($limitRaw, $validLimits, true) ? $limitRaw : 0;
+
         $menuRes = (new MenuSyncService($this->options, $this->langs))->bootstrap();
         set_transient('osct_menu_sync', $menuRes, 300);
 
@@ -122,6 +126,7 @@ final class Hooks
             'blocks'      => !empty($_POST['osct_do_blocks']),
             'jobs'        => !empty($_POST['osct_do_jobs']),
             'test'        => !empty($_POST['osct_test']),
+            'jobs_limit'  => $jobsLimit > 0 ? $jobsLimit : null,
         ];
 
         if (!empty($what['test'])) {
