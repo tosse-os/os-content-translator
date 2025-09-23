@@ -353,11 +353,30 @@ final class JobsRunner
   private function decodeJobValue($raw): array
   {
     $val = maybe_unserialize($raw);
+    $val = $this->normalizeDecodedValue($val);
+
     if (!is_array($val)) {
       $decoded = is_string($raw) ? json_decode($raw, true) : null;
       $val = is_array($decoded) ? $decoded : [];
     }
     return $val;
+  }
+
+  private function normalizeDecodedValue($value)
+  {
+    if (is_object($value)) {
+      $value = get_object_vars($value);
+    }
+
+    if (is_array($value)) {
+      $normalized = [];
+      foreach ($value as $k => $v) {
+        $normalized[$k] = $this->normalizeDecodedValue($v);
+      }
+      return $normalized;
+    }
+
+    return $value;
   }
 
   private function countWords(string $html): int
@@ -402,6 +421,10 @@ final class JobsRunner
         }
       }
       return [$value];
+    }
+
+    if (is_object($value)) {
+      $value = get_object_vars($value);
     }
 
     if (is_array($value)) {
