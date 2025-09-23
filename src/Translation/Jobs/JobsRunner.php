@@ -370,12 +370,46 @@ final class JobsRunner
   {
     $wt = $this->countWords($title);
     $ct = $this->countChars($title);
-    $fields = ['Arbeitgeberleistung', 'Aufgaben', 'FachlicheAnforderungen', 'KontaktText', 'BezeichnungAusschreibung'];
-    $buf = '';
-    foreach ($fields as $f) if (!empty($val[$f]) && is_string($val[$f])) $buf .= ' ' . $val[$f];
+    $parts = $this->collectContentStrings($val);
+    $buf = empty($parts) ? '' : (' ' . implode(' ', $parts));
     $wc = $this->countWords($buf);
     $cc = $this->countChars($buf);
     return ['wt' => $wt, 'ct' => $ct, 'wc' => $wc, 'cc' => $cc];
+  }
+
+  private function collectContentStrings($value, ?string $key = null): array
+  {
+    $skipKeys = ['LinkSlug', 'EinsatzortPlz', 'EinsatzortOrt'];
+    if (is_string($key) && in_array($key, $skipKeys, true)) {
+      return [];
+    }
+
+    if (is_string($value)) {
+      $value = trim($value);
+      if ($value === '') return [];
+      if ($key === 'JsonLd') {
+        $decoded = json_decode($value, true);
+        if (is_array($decoded)) {
+          return $this->collectContentStrings($decoded);
+        }
+      }
+      return [$value];
+    }
+
+    if (is_array($value)) {
+      $parts = [];
+      foreach ($value as $k => $v) {
+        if (is_string($k) && str_starts_with($k, '@')) {
+          continue;
+        }
+        foreach ($this->collectContentStrings($v, is_string($k) ? $k : null) as $piece) {
+          $parts[] = $piece;
+        }
+      }
+      return $parts;
+    }
+
+    return [];
   }
 
   private function toMysqlDate(?string $s): ?string

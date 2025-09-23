@@ -114,7 +114,7 @@ final class Hooks
         $runId = wp_generate_uuid4();
 
         $limitRaw = isset($_POST['osct_jobs_limit']) ? (int)$_POST['osct_jobs_limit'] : 0;
-        $validLimits = [0, 10, 50, 100, 250, 500];
+        $validLimits = [0, 3, 10, 50, 100, 250, 500];
         $jobsLimit = in_array($limitRaw, $validLimits, true) ? $limitRaw : 0;
 
         $menuRes = (new MenuSyncService($this->options, $this->langs))->bootstrap();

@@ -109,6 +109,7 @@ final class DashboardPage
         echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_test" value="1" checked> Testlauf</label></p>';
         echo '<p style="margin-bottom:8px">Stellenanzeigen-Limit: <select name="osct_jobs_limit">'
             . '<option value="0" selected>Alle offenen Stellen</option>'
+            . '<option value="3">Erste 3</option>'
             . '<option value="10">Erste 10</option>'
             . '<option value="50">Erste 50</option>'
             . '<option value="100">Erste 100</option>'
