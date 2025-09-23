@@ -65,18 +65,33 @@ final class LogRepo {
         $table = $this->table();
         $where = '1=1';
         $params = [];
+        if (!empty($args['search'])) {
+            $where .= ' AND (post_id = %d OR target_lang = %s)';
+            $params[] = (int)$args['search'];
+            $params[] = $args['search'];
+        }
         if (!empty($args['from'])) { $where.=' AND created_at >= %s'; $params[]=$args['from']; }
         if (!empty($args['to']))   { $where.=' AND created_at <= %s'; $params[]=$args['to']; }
         $sql = "SELECT
             COUNT(*) as entries,
             SUM(words_title+words_content) as words,
-            SUM(chars_title+chars_content) as chars
+            SUM(chars_title+chars_content) as chars,
+            SUM(CASE WHEN post_type = 'job' THEN 1 ELSE 0 END) as entries_job,
+            SUM(CASE WHEN post_type = 'job' THEN words_title+words_content ELSE 0 END) as words_job,
+            SUM(CASE WHEN post_type = 'job' THEN chars_title+chars_content ELSE 0 END) as chars_job,
+            SUM(CASE WHEN provider = 'google' THEN chars_title+chars_content ELSE 0 END) as chars_google,
+            SUM(CASE WHEN provider = 'google' AND post_type = 'job' THEN chars_title+chars_content ELSE 0 END) as chars_google_job
             FROM $table WHERE $where";
         $row = $wpdb->get_row($wpdb->prepare($sql,$params), ARRAY_A);
         return [
             'entries'=>(int)($row['entries'] ?? 0),
             'words'  =>(int)($row['words'] ?? 0),
             'chars'  =>(int)($row['chars'] ?? 0),
+            'entries_job'=>(int)($row['entries_job'] ?? 0),
+            'words_job'  =>(int)($row['words_job'] ?? 0),
+            'chars_job'  =>(int)($row['chars_job'] ?? 0),
+            'chars_google'=>(int)($row['chars_google'] ?? 0),
+            'chars_google_job'=>(int)($row['chars_google_job'] ?? 0),
         ];
     }
 
