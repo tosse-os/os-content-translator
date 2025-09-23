@@ -82,8 +82,7 @@ final class JobsRunner
         if (!$needsTranslation) {
           $jobId   = (string)$r['job_id'];
           $nameSrc = (string)$r['job_name'];
-          $val     = maybe_unserialize($r['job_value']);
-          if (!is_array($val)) $val = [];
+          $val     = $this->decodeJobValue($r['job_value']);
 
           $srcHash = $this->srcHash($nameSrc, $val);
 
@@ -137,8 +136,7 @@ final class JobsRunner
     foreach ($limited as $r) {
       $jobId   = (string)$r['job_id'];
       $nameSrc = (string)$r['job_name'];
-      $val     = maybe_unserialize($r['job_value']);
-      if (!is_array($val)) $val = [];
+      $val     = $this->decodeJobValue($r['job_value']);
 
       $srcHash = $this->srcHash($nameSrc, $val);
       $mSrc    = $this->countAll($nameSrc, $val);
@@ -350,6 +348,16 @@ final class JobsRunner
       if (str_starts_with($u, $home)) $u = $langHome . substr($u, strlen($home));
     }
     return $u;
+  }
+
+  private function decodeJobValue($raw): array
+  {
+    $val = maybe_unserialize($raw);
+    if (!is_array($val)) {
+      $decoded = is_string($raw) ? json_decode($raw, true) : null;
+      $val = is_array($decoded) ? $decoded : [];
+    }
+    return $val;
   }
 
   private function countWords(string $html): int
