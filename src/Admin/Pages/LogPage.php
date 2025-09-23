@@ -8,14 +8,40 @@ final class LogPage {
     public function __construct(private LogRepo $repo) {}
 
     public function render(): void {
-        $search = isset($_GET['s']) ? sanitize_text_field($_GET['s']) : '';
-        $from   = isset($_GET['from']) ? sanitize_text_field($_GET['from']) : '';
-        $to     = isset($_GET['to']) ? sanitize_text_field($_GET['to']) : '';
+        $userId = get_current_user_id();
+        $optionKey = 'osct_logs_filters';
+        $stored = [];
+        if ($userId) {
+            $raw = get_user_option($optionKey, $userId);
+            if (is_array($raw)) {
+                $stored = $raw;
+            }
+        }
+
+        $resetFilters = isset($_GET['reset']);
+        if ($resetFilters && $userId) {
+            delete_user_option($userId, $optionKey);
+            $stored = [];
+        }
+
+        $search = isset($_GET['s']) ? sanitize_text_field($_GET['s']) : sanitize_text_field($stored['s'] ?? '');
+        $from   = isset($_GET['from']) ? sanitize_text_field($_GET['from']) : sanitize_text_field($stored['from'] ?? '');
+        $to     = isset($_GET['to']) ? sanitize_text_field($_GET['to']) : sanitize_text_field($stored['to'] ?? '');
         $paged  = isset($_GET['paged']) ? max(1, (int)$_GET['paged']) : 1;
-        $type   = isset($_GET['post_type']) ? sanitize_text_field($_GET['post_type']) : '';
+        $type   = isset($_GET['post_type']) ? sanitize_text_field($_GET['post_type']) : sanitize_text_field($stored['post_type'] ?? '');
         $allowedTypes = ['', 'job', 'page', 'wp-log'];
         if (!in_array($type, $allowedTypes, true)) {
             $type = '';
+        }
+
+        $filterProvided = isset($_GET['s']) || isset($_GET['from']) || isset($_GET['to']) || isset($_GET['post_type']);
+        if ($userId && !$resetFilters && $filterProvided) {
+            update_user_option($userId, $optionKey, [
+                's'         => $search,
+                'from'      => $from,
+                'to'        => $to,
+                'post_type' => $type,
+            ]);
         }
 
         if (isset($_GET['export']) && $_GET['export']==='csv') {
@@ -55,7 +81,7 @@ final class LogPage {
         }
         echo '</select>';
         echo ' <button class="button">Filtern</button>';
-        echo ' <a class="button" href="'.esc_url(add_query_arg(['page'=>'osct-logs'], admin_url('admin.php'))).'">Reset</a>';
+        echo ' <a class="button" href="'.esc_url(add_query_arg(['page'=>'osct-logs','reset'=>1], admin_url('admin.php'))).'">Reset</a>';
         echo ' <a class="button button-secondary" href="'.esc_url(add_query_arg(['page'=>'osct-logs','s'=>$search,'from'=>$from,'to'=>$to,'post_type'=>$type,'export'=>'csv'], admin_url('admin.php'))).'">CSV export</a>';
         echo '</p>';
         echo '</form>';
