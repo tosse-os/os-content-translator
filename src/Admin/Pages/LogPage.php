@@ -12,17 +12,22 @@ final class LogPage {
         $from   = isset($_GET['from']) ? sanitize_text_field($_GET['from']) : '';
         $to     = isset($_GET['to']) ? sanitize_text_field($_GET['to']) : '';
         $paged  = isset($_GET['paged']) ? max(1, (int)$_GET['paged']) : 1;
+        $type   = isset($_GET['post_type']) ? sanitize_text_field($_GET['post_type']) : '';
+        $allowedTypes = ['', 'job', 'page', 'wp-log'];
+        if (!in_array($type, $allowedTypes, true)) {
+            $type = '';
+        }
 
         if (isset($_GET['export']) && $_GET['export']==='csv') {
-            $csv = $this->repo->exportCsv(['search'=>$search,'from'=>$from,'to'=>$to]);
+            $csv = $this->repo->exportCsv(['search'=>$search,'from'=>$from,'to'=>$to,'post_type'=>$type]);
             header('Content-Type: text/csv');
             header('Content-Disposition: attachment; filename=osct-logs.csv');
             echo $csv;
             exit;
         }
 
-        $data = $this->repo->list(['search'=>$search,'from'=>$from,'to'=>$to,'paged'=>$paged,'per_page'=>50]);
-        $sums = $this->repo->sums(['search'=>$search,'from'=>$from,'to'=>$to]);
+        $data = $this->repo->list(['search'=>$search,'from'=>$from,'to'=>$to,'paged'=>$paged,'per_page'=>50,'post_type'=>$type]);
+        $sums = $this->repo->sums(['search'=>$search,'from'=>$from,'to'=>$to,'post_type'=>$type]);
 
         $googleRatePerMillion = 20; // USD per 1M characters (approx.)
         $googleCostAll = ($sums['chars_google'] / 1000000) * $googleRatePerMillion;
@@ -37,9 +42,21 @@ final class LogPage {
         echo '<input type="text" name="s" value="'.esc_attr($search).'" placeholder="Post-ID oder Sprache" class="regular-text" style="max-width:220px">';
         echo ' Von: <input type="date" name="from" value="'.esc_attr($from).'">';
         echo ' Bis: <input type="date" name="to" value="'.esc_attr($to).'">';
+        echo ' <select name="post_type">';
+        $typeLabels = [
+            '' => 'Alle Typen',
+            'job' => 'Stellenanzeigen',
+            'page' => 'Seiten',
+            'wp-log' => 'WP Logs',
+        ];
+        foreach ($typeLabels as $key => $label) {
+            $selected = selected($type, $key, false);
+            echo '<option value="'.esc_attr($key).'" '.$selected.'>'.esc_html($label).'</option>';
+        }
+        echo '</select>';
         echo ' <button class="button">Filtern</button>';
         echo ' <a class="button" href="'.esc_url(add_query_arg(['page'=>'osct-logs'], admin_url('admin.php'))).'">Reset</a>';
-        echo ' <a class="button button-secondary" href="'.esc_url(add_query_arg(['page'=>'osct-logs','s'=>$search,'from'=>$from,'to'=>$to,'export'=>'csv'], admin_url('admin.php'))).'">CSV export</a>';
+        echo ' <a class="button button-secondary" href="'.esc_url(add_query_arg(['page'=>'osct-logs','s'=>$search,'from'=>$from,'to'=>$to,'post_type'=>$type,'export'=>'csv'], admin_url('admin.php'))).'">CSV export</a>';
         echo '</p>';
         echo '</form>';
 
@@ -83,7 +100,7 @@ final class LogPage {
         if ($pages > 1) {
             echo '<div class="tablenav"><div class="tablenav-pages">';
             for ($i=1;$i<=$pages;$i++) {
-                $url = add_query_arg(['page'=>'osct-logs','s'=>$search,'from'=>$from,'to'=>$to,'paged'=>$i], admin_url('admin.php'));
+                $url = add_query_arg(['page'=>'osct-logs','s'=>$search,'from'=>$from,'to'=>$to,'post_type'=>$type,'paged'=>$i], admin_url('admin.php'));
                 $cls = $i==$data['paged'] ? 'class="page-numbers current"' : 'class="page-numbers"';
                 echo '<a '.$cls.' href="'.esc_url($url).'">'.$i.'</a> ';
             }

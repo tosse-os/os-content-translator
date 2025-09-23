@@ -46,6 +46,11 @@ final class LogRepo {
             $where .= ' AND created_at <= %s';
             $params[] = $args['to'];
         }
+        if (!empty($args['post_type'])) {
+            $where .= ' AND post_type = %s';
+            $params[] = $args['post_type'];
+        }
+
         $paged = max(1, (int)($args['paged'] ?? 1));
         $pp    = max(1, (int)($args['per_page'] ?? 50));
         $off   = ($paged-1)*$pp;
@@ -72,6 +77,7 @@ final class LogRepo {
         }
         if (!empty($args['from'])) { $where.=' AND created_at >= %s'; $params[]=$args['from']; }
         if (!empty($args['to']))   { $where.=' AND created_at <= %s'; $params[]=$args['to']; }
+        if (!empty($args['post_type'])) { $where.=' AND post_type = %s'; $params[]=$args['post_type']; }
         $sql = "SELECT
             COUNT(*) as entries,
             SUM(words_title+words_content) as words,
