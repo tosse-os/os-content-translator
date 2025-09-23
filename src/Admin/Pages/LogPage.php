@@ -22,7 +22,12 @@ final class LogPage {
         }
 
         $data = $this->repo->list(['search'=>$search,'from'=>$from,'to'=>$to,'paged'=>$paged,'per_page'=>50]);
-        $sums = $this->repo->sums(['from'=>$from,'to'=>$to]);
+        $sums = $this->repo->sums(['search'=>$search,'from'=>$from,'to'=>$to]);
+
+        $googleRatePerMillion = 20; // USD per 1M characters (approx.)
+        $googleCostAll = ($sums['chars_google'] / 1000000) * $googleRatePerMillion;
+        $googleCostJobs = ($sums['chars_google_job'] / 1000000) * $googleRatePerMillion;
+        $formatCost = static fn(float $amount): string => number_format($amount, 2, ',', '.') . ' USD';
 
         echo '<div class="wrap"><h1>OS Content Translator – Logs</h1>';
 
@@ -38,7 +43,11 @@ final class LogPage {
         echo '</p>';
         echo '</form>';
 
-        echo '<p><strong>Summen</strong>: Einträge '.(int)$sums['entries'].', Wörter '.(int)$sums['words'].', Zeichen '.(int)$sums['chars'].'</p>';
+        echo '<p><strong>Summen</strong>: Einträge '.(int)$sums['entries'].', Wörter '.(int)$sums['words'].', Zeichen '.(int)$sums['chars'];
+        echo '. Geschätzte Google-Kosten: ' . esc_html($formatCost($googleCostAll)) . '.</p>';
+
+        echo '<p><strong>Summen – Stellenanzeigen</strong>: Einträge '.(int)$sums['entries_job'].', Wörter '.(int)$sums['words_job'].', Zeichen '.(int)$sums['chars_job'];
+        echo '. Geschätzte Google-Kosten: ' . esc_html($formatCost($googleCostJobs)) . '.</p>';
 
         $last = $this->repo->lastRunJobSummary();
         echo '<p><strong>Letzter Lauf – Stellenanzeigen:</strong> Übersetzt ' . (int)$last['entries'] . ' Einträge, Wörter ' . (int)$last['words'] . ', Zeichen ' . (int)$last['chars'] . '.</p>';
