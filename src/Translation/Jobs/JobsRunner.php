@@ -130,8 +130,10 @@ final class JobsRunner
 
     $created = 0;
     $skipped = 0;
-    $words   = 0;
-    $chars   = 0;
+    $wordsTitleTotal = 0;
+    $charsTitleTotal = 0;
+    $wordsContentTotal = 0;
+    $charsContentTotal = 0;
 
     foreach ($limited as $r) {
       $jobId   = (string)$r['job_id'];
@@ -256,8 +258,10 @@ final class JobsRunner
 
         // Log/Metriken
         $mm    = $this->countAll($baseTitle, $valTr);
-        $words += $mm['wt'] + $mm['wc'];
-        $chars += $mm['ct'] + $mm['cc'];
+        $wordsTitleTotal   += $mm['wt'];
+        $charsTitleTotal   += $mm['ct'];
+        $wordsContentTotal += $mm['wc'];
+        $charsContentTotal += $mm['cc'];
         $action = ($existing ? 'update' : 'create');
 
         $this->logs->insert([
@@ -281,6 +285,9 @@ final class JobsRunner
       }
     }
 
+    $totalWords = $wordsTitleTotal + $wordsContentTotal;
+    $totalChars = $charsTitleTotal + $charsContentTotal;
+
     $this->logs->insert([
       'run_id'         => $this->currentRunId(),
       'post_id'        => 0,
@@ -290,22 +297,31 @@ final class JobsRunner
       'provider'       => 'mixed',
       'action'         => 'summary',
       'status'         => 'info',
-      'words_title'    => $words,
-      'chars_title'    => $chars,
-      'words_content'  => 0,
-      'chars_content'  => 0,
+      'words_title'    => $wordsTitleTotal,
+      'chars_title'    => $charsTitleTotal,
+      'words_content'  => $wordsContentTotal,
+      'chars_content'  => $charsContentTotal,
       'src_hash'       => '',
       'message'        => sprintf(
-        'Summary; jobs=%d; created=%d; skipped=%d; words=%d; chars=%d',
+        'Summary; jobs=%d; created=%d; skipped=%d; words=%d; chars=%d; words_title=%d; words_content=%d; chars_title=%d; chars_content=%d',
         $created + $skipped,
         $created,
         $skipped,
-        $words,
-        $chars
+        $totalWords,
+        $totalChars,
+        $wordsTitleTotal,
+        $wordsContentTotal,
+        $charsTitleTotal,
+        $charsContentTotal
       ),
     ]);
 
-    return ['created' => $created, 'skipped' => $skipped, 'words' => $words, 'chars' => $chars];
+    return [
+      'created' => $created,
+      'skipped' => $skipped,
+      'words'   => $totalWords,
+      'chars'   => $totalChars,
+    ];
   }
 
   private function t(string $text, string $lang, string $source): string
