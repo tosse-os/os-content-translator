@@ -281,6 +281,30 @@ final class JobsRunner
       }
     }
 
+    $this->logs->insert([
+      'run_id'         => $this->currentRunId(),
+      'post_id'        => 0,
+      'post_type'      => 'job',
+      'source_lang'    => $source,
+      'target_lang'    => '-',
+      'provider'       => 'mixed',
+      'action'         => 'summary',
+      'status'         => 'info',
+      'words_title'    => $words,
+      'chars_title'    => $chars,
+      'words_content'  => 0,
+      'chars_content'  => 0,
+      'src_hash'       => '',
+      'message'        => sprintf(
+        'Summary; jobs=%d; created=%d; skipped=%d; words=%d; chars=%d',
+        $created + $skipped,
+        $created,
+        $skipped,
+        $words,
+        $chars
+      ),
+    ]);
+
     return ['created' => $created, 'skipped' => $skipped, 'words' => $words, 'chars' => $chars];
   }
 
