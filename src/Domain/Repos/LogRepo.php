@@ -159,4 +159,41 @@ final class LogRepo {
             'chars'  => (int)($row['chars'] ?? 0),
         ];
     }
+
+    public function lastRunJobEntries(): array
+    {
+        global $wpdb;
+        $table = $this->table();
+        $runId = $this->lastRunId();
+        if (!$runId) {
+            return [];
+        }
+
+        $sql = "SELECT id, created_at, source_lang, target_lang, provider, action, status,
+            words_title, chars_title, words_content, chars_content, message
+            FROM $table
+            WHERE run_id = %s AND post_type = 'job' AND action IN ('create','update','skip','error')
+            ORDER BY id ASC";
+
+        $rows = $wpdb->get_results($wpdb->prepare($sql, $runId), ARRAY_A);
+        if (!$rows) {
+            return [];
+        }
+
+        return array_map(function (array $row): array {
+            $row['words_total'] = (int)$row['words_title'] + (int)$row['words_content'];
+            $row['chars_total'] = (int)$row['chars_title'] + (int)$row['chars_content'];
+            $row['job_id'] = $this->extractJobId((string)$row['message']);
+            return $row;
+        }, $rows);
+    }
+
+    private function extractJobId(string $message): string
+    {
+        if (preg_match('/job_id=([^;\s]+)/i', $message, $m)) {
+            return trim($m[1]);
+        }
+
+        return '';
+    }
 }
