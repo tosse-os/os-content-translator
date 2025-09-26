@@ -126,15 +126,17 @@ final class LogRepo {
         $table = $this->table();
         $runId = $this->lastRunId();
         if (!$runId) return ['entries' => 0, 'words' => 0, 'chars' => 0];
-        $summarySql = "SELECT words_title, chars_title, message FROM $table
+        $summarySql = "SELECT words_title, chars_title, words_content, chars_content, message FROM $table
             WHERE run_id = %s AND post_type = 'job' AND action = 'summary'
             ORDER BY id DESC LIMIT 1";
         $summary = $wpdb->get_row($wpdb->prepare($summarySql, $runId), ARRAY_A);
         if ($summary) {
+            $wordsSummary = (int)($summary['words_title'] ?? 0) + (int)($summary['words_content'] ?? 0);
+            $charsSummary = (int)($summary['chars_title'] ?? 0) + (int)($summary['chars_content'] ?? 0);
             $counts = [
                 'entries' => 0,
-                'words'   => (int)($summary['words_title'] ?? 0),
-                'chars'   => (int)($summary['chars_title'] ?? 0),
+                'words'   => $wordsSummary,
+                'chars'   => $charsSummary,
             ];
 
             if (preg_match('/jobs=(\d+)/', (string)$summary['message'], $m)) {
