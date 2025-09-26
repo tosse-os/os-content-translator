@@ -29,7 +29,7 @@ final class LogPage {
         $to     = isset($_GET['to']) ? sanitize_text_field($_GET['to']) : sanitize_text_field($stored['to'] ?? '');
         $paged  = isset($_GET['paged']) ? max(1, (int)$_GET['paged']) : 1;
         $type   = isset($_GET['post_type']) ? sanitize_text_field($_GET['post_type']) : sanitize_text_field($stored['post_type'] ?? '');
-        $allowedTypes = ['', 'job', 'page', 'wp-log'];
+        $allowedTypes = ['', 'job', 'page', 'wp_blocks'];
         if (!in_array($type, $allowedTypes, true)) {
             $type = '';
         }
@@ -73,7 +73,7 @@ final class LogPage {
             '' => 'Alle Typen',
             'job' => 'Stellenanzeigen',
             'page' => 'Seiten',
-            'wp-log' => 'WP Logs',
+            'wp_blocks' => 'WP Blocks',
         ];
         foreach ($typeLabels as $key => $label) {
             $selected = selected($type, $key, false);
