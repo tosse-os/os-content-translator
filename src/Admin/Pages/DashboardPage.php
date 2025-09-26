@@ -41,7 +41,17 @@ final class DashboardPage
 
         echo '<div class="wrap"><h1>OS Content Translator – Dashboard</h1>';
         if ($tr && is_array($tr)) {
-            echo '<div class="notice notice-success is-dismissible"><p>Übersetzung abgeschlossen. Neu: ' . intval($tr['created']) . ', übersprungen: ' . intval($tr['skipped']) . '.</p></div>';
+            $words = isset($tr['words']) ? intval($tr['words']) : null;
+            $chars = isset($tr['chars']) ? intval($tr['chars']) : null;
+            $metrics = '';
+            if ($words !== null || $chars !== null) {
+                $parts = [];
+                if ($words !== null) $parts[] = 'Wörter: ' . $words;
+                if ($chars !== null) $parts[] = 'Zeichen: ' . $chars;
+                if ($parts) $metrics = ' ' . implode(', ', $parts) . '.';
+            }
+
+            echo '<div class="notice notice-success is-dismissible"><p>Übersetzung abgeschlossen. Neu: ' . intval($tr['created']) . ', übersprungen: ' . intval($tr['skipped']) . '.' . esc_html($metrics) . '</p></div>';
         }
 
         $menuDbg = get_transient('osct_menu_debug');

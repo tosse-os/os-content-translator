@@ -78,6 +78,7 @@ final class LogRepo {
         if (!empty($args['from'])) { $where.=' AND created_at >= %s'; $params[]=$args['from']; }
         if (!empty($args['to']))   { $where.=' AND created_at <= %s'; $params[]=$args['to']; }
         if (!empty($args['post_type'])) { $where.=' AND post_type = %s'; $params[]=$args['post_type']; }
+        $whereSummary = $where . " AND action <> 'summary'";
         $sql = "SELECT
             COUNT(*) as entries,
             SUM(words_title+words_content) as words,
@@ -87,7 +88,7 @@ final class LogRepo {
             SUM(CASE WHEN post_type = 'job' THEN chars_title+chars_content ELSE 0 END) as chars_job,
             SUM(CASE WHEN provider = 'google' THEN chars_title+chars_content ELSE 0 END) as chars_google,
             SUM(CASE WHEN provider = 'google' AND post_type = 'job' THEN chars_title+chars_content ELSE 0 END) as chars_google_job
-            FROM $table WHERE $where";
+            FROM $table WHERE $whereSummary";
         $row = $wpdb->get_row($wpdb->prepare($sql,$params), ARRAY_A);
         return [
             'entries'=>(int)($row['entries'] ?? 0),
@@ -125,12 +126,32 @@ final class LogRepo {
         $table = $this->table();
         $runId = $this->lastRunId();
         if (!$runId) return ['entries' => 0, 'words' => 0, 'chars' => 0];
+        $summarySql = "SELECT words_title, chars_title, words_content, chars_content, message FROM $table
+            WHERE run_id = %s AND post_type = 'job' AND action = 'summary'
+            ORDER BY id DESC LIMIT 1";
+        $summary = $wpdb->get_row($wpdb->prepare($summarySql, $runId), ARRAY_A);
+        if ($summary) {
+            $wordsSummary = (int)($summary['words_title'] ?? 0) + (int)($summary['words_content'] ?? 0);
+            $charsSummary = (int)($summary['chars_title'] ?? 0) + (int)($summary['chars_content'] ?? 0);
+            $counts = [
+                'entries' => 0,
+                'words'   => $wordsSummary,
+                'chars'   => $charsSummary,
+            ];
+
+            if (preg_match('/jobs=(\d+)/', (string)$summary['message'], $m)) {
+                $counts['entries'] = (int)$m[1];
+            }
+
+            return $counts;
+        }
+
         $sql = "SELECT
-        COUNT(*) as entries,
-        SUM(words_title+words_content) as words,
-        SUM(chars_title+chars_content) as chars
-        FROM $table
-        WHERE run_id = %s AND post_type = 'job' AND action IN ('create','update')";
+            COUNT(*) as entries,
+            SUM(words_title+words_content) as words,
+            SUM(chars_title+chars_content) as chars
+            FROM $table
+            WHERE run_id = %s AND post_type = 'job' AND action IN ('create','update')";
         $row = $wpdb->get_row($wpdb->prepare($sql, $runId), ARRAY_A);
         return [
             'entries' => (int)($row['entries'] ?? 0),
