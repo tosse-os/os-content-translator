@@ -127,6 +127,25 @@ final class TranslationService
         return '';
     }
 
+    public function quickTranslate(string $text, string $targetLang, ?string $sourceLang = null): string
+    {
+        if ($text === '') {
+            return '';
+        }
+
+        if (trim($text) === '') {
+            return $text;
+        }
+
+        $source = $sourceLang ?: $this->langs->default();
+        if ($targetLang === '' || $targetLang === $source) {
+            return $text;
+        }
+
+        $translated = $this->t($text, $targetLang, $source);
+        return $translated !== '' ? $translated : $text;
+    }
+
     public function state(int $srcId, string $lang): string
     {
         if (!function_exists('pll_get_post')) return 'missing';
