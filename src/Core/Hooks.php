@@ -117,7 +117,11 @@ final class Hooks
         $validLimits = [0, 3, 10, 50, 100, 250, 500];
         $jobsLimit = in_array($limitRaw, $validLimits, true) ? $limitRaw : 0;
 
-        $menuRes = (new MenuSyncService($this->options, $this->langs))->bootstrap();
+        $menuRes = (new MenuSyncService(
+            $this->options,
+            $this->langs,
+            fn(string $text, string $lang, string $source) => $this->translator->quickTranslate($text, $lang, $source)
+        ))->bootstrap();
         set_transient('osct_menu_sync', $menuRes, 300);
 
         $what = [

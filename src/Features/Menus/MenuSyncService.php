@@ -4,14 +4,29 @@ namespace OSCT\Features\Menus;
 
 use OSCT\Domain\Repos\OptionRepo;
 use OSCT\Domain\Repos\LanguageRepo;
+use OSCT\Translation\TranslationService;
 
 if (!defined('ABSPATH')) exit;
 
 final class MenuSyncService
 {
   private array $debug = [];
+  /** @var callable|null */
+  private $translator;
 
-  public function __construct(private OptionRepo $opt, private LanguageRepo $langs) {}
+  public function __construct(
+    private OptionRepo $opt,
+    private LanguageRepo $langs,
+    TranslationService|callable|null $translator = null
+  ) {
+    if ($translator instanceof TranslationService) {
+      $this->translator = fn(string $text, string $lang, string $source) => $translator->quickTranslate($text, $lang, $source);
+    } elseif (is_callable($translator)) {
+      $this->translator = $translator;
+    } else {
+      $this->translator = null;
+    }
+  }
 
   public function bootstrap(): array
   {
@@ -87,6 +102,7 @@ final class MenuSyncService
     usort($srcItems, fn($a, $b) => ($a->menu_order ?? 0) <=> ($b->menu_order ?? 0));
 
     $created = 0;
+    $sourceLang = $this->langs->default();
 
     foreach ($srcItems as $it) {
       $type   = get_post_meta($it->ID, '_menu_item_type', true) ?: (string)$it->type;
@@ -101,11 +117,13 @@ final class MenuSyncService
       }
       if ($title === '' && $type === 'custom') $title = $url ?: '#';
 
+      $translatedTitle = $this->translateTitle($title, $lang, $sourceLang, $dstName, (int)$it->ID);
+
       $args = [
         'menu-item-status'    => 'publish',
         'menu-item-position'  => (int)($it->menu_order ?? 0),
         'menu-item-parent-id' => 0,
-        'menu-item-title'     => $title,
+        'menu-item-title'     => $translatedTitle,
       ];
 
       if ($type === 'post_type') {
@@ -147,6 +165,7 @@ final class MenuSyncService
 
     $map = [];
     $created = 0;
+    $sourceLang = $this->langs->default();
 
     foreach ($srcItems as $it) {
       $type   = get_post_meta($it->ID, '_menu_item_type', true) ?: (string)$it->type;
@@ -161,11 +180,13 @@ final class MenuSyncService
       }
       if ($title === '' && $type === 'custom') $title = $url ?: '#';
 
+      $translatedTitle = $this->translateTitle($title, $lang, $sourceLang, $dstName, (int)$it->ID);
+
       $args = [
         'menu-item-status'    => 'publish',
         'menu-item-position'  => (int)($it->menu_order ?? 0),
         'menu-item-parent-id' => 0,
-        'menu-item-title'     => $title,
+        'menu-item-title'     => $translatedTitle,
       ];
 
       if ($type === 'post_type') {
@@ -235,5 +256,39 @@ final class MenuSyncService
     foreach ($slots as $slot) $loc[$slot] = $menuId;
     set_theme_mod('nav_menu_locations', $loc);
     if ($restore && function_exists('pll_switch_language')) pll_switch_language($restore);
+  }
+
+  private function translateTitle(string $title, string $targetLang, string $sourceLang, string $menuName, int $itemId): string
+  {
+    $result = $title;
+    $translated = null;
+
+    if (is_callable($this->translator) && $title !== '') {
+      try {
+        $translated = call_user_func($this->translator, $title, $targetLang, $sourceLang);
+      } catch (\Throwable $e) {
+        $this->debug[] = [
+          'menu'       => $menuName,
+          'item_id'    => $itemId,
+          'lang'       => $targetLang,
+          'title_src'  => $title,
+          'error'      => $e->getMessage(),
+        ];
+      }
+    }
+
+    if (is_string($translated) && $translated !== '') {
+      $result = $translated;
+    }
+
+    $this->debug[] = [
+      'menu'       => $menuName,
+      'item_id'    => $itemId,
+      'lang'       => $targetLang,
+      'title_src'  => $title,
+      'title_dst'  => $result,
+    ];
+
+    return $result;
   }
 }
