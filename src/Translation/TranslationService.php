@@ -244,7 +244,7 @@ final class TranslationService
     public function translateSingle(int $post_id)
     {
         $post = get_post($post_id);
-        if (!$post || $post->post_status === 'trash' || !in_array($post->post_type, ['page', 'wp_block'], true))
+        if (!$post || $post->post_status === 'trash' || !in_array($post->post_type, ['page', 'wp_block', 'wp_navigation'], true))
             return new \WP_Error('invalid', 'Invalid post');
         if (!function_exists('pll_set_post_language')) return new \WP_Error('nopll', 'Polylang missing');
 

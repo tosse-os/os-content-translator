@@ -75,7 +75,7 @@ function osct_translation_state($src_id,$lang){
 function osct_translate_single($post_id) {
     $post = get_post($post_id);
     if (!$post || $post->post_status === 'trash') return new WP_Error('invalid_post','Invalid post');
-    if (!in_array($post->post_type, ['page','wp_block'], true)) return new WP_Error('invalid_type','Unsupported type');
+    if (!in_array($post->post_type, ['page','wp_block','wp_navigation'], true)) return new WP_Error('invalid_type','Unsupported type');
 
     $o = get_option('osct_settings', []);
     $in_menu = in_array((int)$post_id, isset($o['page_whitelist'])?$o['page_whitelist']:[], true) || in_array((int)$post_id, isset($o['page_whitelist_extra'])?$o['page_whitelist_extra']:[], true);

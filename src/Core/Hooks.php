@@ -83,6 +83,9 @@ final class Hooks
         if (!function_exists('pll_get_post_types') || !function_exists('pll_set_post_types')) return;
         $types = pll_get_post_types();
         $types['wp_block'] = 'wp_block';
+        if (post_type_exists('wp_navigation')) {
+            $types['wp_navigation'] = 'wp_navigation';
+        }
         pll_set_post_types($types);
     }
 

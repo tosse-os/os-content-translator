@@ -69,7 +69,7 @@ function osct_render_dashboard() {
     echo '<table class="widefat striped"><tbody>';
     echo '<tr><td>Aktives Menü</td><td>'.($menu_id?esc_html($menu_name).' (#'.(int)$menu_id.')':'–').'</td></tr>';
     echo '<tr><td>Freigegebene Seiten (gesamt)</td><td>'.(int)$total_pages.'</td></tr>';
-    echo '<tr><td>Freigegebene Reusable Blocks</td><td>'.(int)$total_blocks.'</td></tr>';
+    echo '<tr><td>Freigegebene Reusable Blocks/Navigationen</td><td>'.(int)$total_blocks.'</td></tr>';
     echo '<tr><td>Aktive Zielsprachen</td><td>'.esc_html(implode(', ', $active)).'</td></tr>';
     echo '</tbody></table>';
 
@@ -111,12 +111,12 @@ function osct_render_dashboard() {
         echo '<p>Keine freigegebenen Seiten oder keine Zielsprachen aktiv.</p>';
     }
 
-    echo '<h2>Reusable Blocks × Sprachen</h2>';
+    echo '<h2>Reusable Blocks &amp; Navigationen × Sprachen</h2>';
     if (!empty($active) && !empty($wl_blocks)) {
         echo '<table class="widefat striped"><thead><tr><th>Block</th>';
         foreach($active as $lang) echo '<th>'.esc_html($lang).'</th>';
         echo '</tr></thead><tbody>';
-        $blocks = get_posts(['post_type'=>'wp_block','post__in'=>$wl_blocks,'posts_per_page'=>-1,'orderby'=>'post__in']);
+        $blocks = get_posts(['post_type'=>['wp_block','wp_navigation'],'post__in'=>$wl_blocks,'posts_per_page'=>-1,'orderby'=>'post__in']);
         foreach ($blocks as $b) {
             echo '<tr>';
             echo '<td>#'.(int)$b->ID.' '.esc_html(get_the_title($b)).'</td>';
@@ -128,16 +128,16 @@ function osct_render_dashboard() {
         }
         echo '</tbody></table>';
     } else {
-        echo '<p>Keine freigegebenen Reusable Blocks oder keine Zielsprachen aktiv.</p>';
+        echo '<p>Keine freigegebenen Reusable Blocks/Navigationen oder keine Zielsprachen aktiv.</p>';
     }
 
     if (!empty($whitelist_all)) {
         echo '<h2>Freigegebene Inhalte</h2>';
         echo '<table class="widefat striped"><thead><tr><th>ID</th><th>Titel</th><th>Permalink</th><th>Typ</th><th>Quelle</th></tr></thead><tbody>';
-        $posts = get_posts(['post_type'=>['page','wp_block'],'post__in'=>$whitelist_all,'posts_per_page'=>-1,'orderby'=>'post__in']);
+        $posts = get_posts(['post_type'=>['page','wp_block','wp_navigation'],'post__in'=>$whitelist_all,'posts_per_page'=>-1,'orderby'=>'post__in']);
         foreach ($posts as $p) {
-            $src = in_array($p->ID,$wl_menu,true) ? 'Menü' : (in_array($p->ID,$wl_blocks,true) ? 'Block' : 'Manuell');
-            $link = $p->post_type==='wp_block' ? get_edit_post_link($p->ID,'') : get_permalink($p);
+            $src = in_array($p->ID,$wl_menu,true) ? 'Menü' : (in_array($p->ID,$wl_blocks,true) ? ($p->post_type==='wp_navigation' ? 'Navigation' : 'Block') : 'Manuell');
+            $link = in_array($p->post_type,['wp_block','wp_navigation'], true) ? get_edit_post_link($p->ID,'') : get_permalink($p);
             echo '<tr>';
             echo '<td>#'.(int)$p->ID.'</td>';
             echo '<td>'.esc_html(get_the_title($p)).'</td>';

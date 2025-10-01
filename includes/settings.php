@@ -114,18 +114,32 @@ function osct_settings_all_pages_excluding($exclude_ids) {
 }
 
 function osct_settings_blocks_all() {
-    $q = new WP_Query([
-        'post_type'=>'wp_block',
-        'post_status'=>'publish',
-        'posts_per_page'=>-1,
-        'orderby'=>'title',
-        'order'=>'ASC',
-        'fields'=>'ids'
-    ]);
+    $types = ['wp_block', 'wp_navigation'];
     $out = [];
-    if ($q->have_posts()) {
-        foreach ($q->posts as $pid) $out[(int)$pid] = get_the_title($pid);
+
+    foreach ($types as $type) {
+        if (!post_type_exists($type)) continue;
+
+        $q = new WP_Query([
+            'post_type'      => $type,
+            'post_status'    => 'publish',
+            'posts_per_page' => -1,
+            'orderby'        => 'title',
+            'order'          => 'ASC',
+            'fields'         => 'ids'
+        ]);
+
+        foreach ($q->posts as $pid) {
+            $title = get_the_title($pid);
+            if ($type === 'wp_navigation') $title = ($title !== '' ? $title : __('(ohne Titel)', 'os-content-translator')) . ' (Navigation)';
+            $out[(int)$pid] = $title !== '' ? $title : sprintf('Block #%d', (int)$pid);
+        }
     }
+
+    if (!empty($out)) {
+        asort($out, SORT_NATURAL | SORT_FLAG_CASE);
+    }
+
     return $out;
 }
 
@@ -217,15 +231,15 @@ function osct_render_settings() {
     }
     echo '</td></tr></tbody></table>';
 
-    echo '<h2>Reusable Blocks</h2>';
-    echo '<table class="form-table"><tbody><tr><th>Blöcke (wp_block)</th><td>';
+    echo '<h2>Reusable Blocks &amp; Navigationen</h2>';
+    echo '<table class="form-table"><tbody><tr><th>Blöcke &amp; Navigationen</th><td>';
     if (!empty($blocks)) {
         foreach ($blocks as $bid=>$title) {
             $checked = in_array((string)$bid, array_map('strval',(array)$o['block_whitelist']), true) ? 'checked' : '';
             echo '<label style="display:block;margin:4px 0"><input type="checkbox" name="block_whitelist[]" value="'.esc_attr($bid).'" '.$checked.'> '.esc_html($title).' (#'.(int)$bid.')</label>';
         }
     } else {
-        echo '<em>Keine veröffentlichten Reusable Blocks gefunden.</em>';
+        echo '<em>Keine veröffentlichten Reusable Blocks oder Navigationen gefunden.</em>';
     }
     echo '</td></tr></tbody></table>';
 

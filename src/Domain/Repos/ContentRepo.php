@@ -34,8 +34,31 @@ final class ContentRepo {
         return $out;
     }
     public function allBlocks(): array {
-        $q = new \WP_Query(['post_type'=>'wp_block','post_status'=>'publish','posts_per_page'=>-1,'orderby'=>'title','order'=>'ASC','fields'=>'ids']);
-        $out=[]; foreach ($q->posts as $id) $out[(int)$id]=get_the_title($id);
+        $types = ['wp_block', 'wp_navigation'];
+        $out = [];
+
+        foreach ($types as $type) {
+            if (!post_type_exists($type)) continue;
+
+            $q = new \WP_Query([
+                'post_type'      => $type,
+                'post_status'    => 'publish',
+                'posts_per_page' => -1,
+                'orderby'        => 'title',
+                'order'          => 'ASC',
+                'fields'         => 'ids'
+            ]);
+
+            foreach ($q->posts as $id) {
+                $title = get_the_title($id);
+                if ($type === 'wp_navigation') {
+                    $title = ($title !== '' ? $title : __('(ohne Titel)', 'os-content-translator')) . ' (Navigation)';
+                }
+                $out[(int)$id] = $title !== '' ? $title : sprintf('Block #%d', (int)$id);
+            }
+        }
+
+        asort($out, SORT_NATURAL | SORT_FLAG_CASE);
         return $out;
     }
     public function menuLanguage(int $menuId): ?string {
@@ -47,7 +70,12 @@ final class ContentRepo {
         return null;
     }
     /** @return \WP_Post[] */
-    public function getPostsByIds(array $ids, string $type): array {
-        return get_posts(['post_type'=>$type,'post__in'=>array_map('intval',$ids),'posts_per_page'=>-1,'orderby'=>'post__in']);
+    public function getPostsByIds(array $ids, string|array $type): array {
+        return get_posts([
+            'post_type'      => $type,
+            'post__in'       => array_map('intval', $ids),
+            'posts_per_page' => -1,
+            'orderby'        => 'post__in'
+        ]);
     }
 }
