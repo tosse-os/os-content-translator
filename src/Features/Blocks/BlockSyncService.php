@@ -29,9 +29,18 @@ final class BlockSyncService {
                 if ($navPost) $parsed_block['attrs']['ref'] = (int)$navPost;
             }
 
-            if (!empty($attrs['menuId']) && function_exists('pll_get_term')) {
-                $menu = pll_get_term((int)$attrs['menuId'], $lang);
-                if ($menu && !is_wp_error($menu)) $parsed_block['attrs']['menuId'] = (int)$menu;
+            if (!empty($attrs['navigationMenuId']) && function_exists('pll_get_term')) {
+                $menu = pll_get_term((int)$attrs['navigationMenuId'], $lang);
+                if ($menu && !is_wp_error($menu)) {
+                    $parsed_block['attrs']['navigationMenuId'] = (int)$menu;
+
+                    if (!empty($attrs['navigationMenuSlug'])) {
+                        $translatedTerm = get_term($menu, 'nav_menu');
+                        if ($translatedTerm && !is_wp_error($translatedTerm) && !empty($translatedTerm->slug)) {
+                            $parsed_block['attrs']['navigationMenuSlug'] = $translatedTerm->slug;
+                        }
+                    }
+                }
             }
 
             return $parsed_block;
