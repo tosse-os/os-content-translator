@@ -98,14 +98,14 @@ final class SettingsPage {
         echo '</td></tr></tbody></table>';
 
         // Reusable Blocks
-        echo '<h2>Wiederverwendbare Blöcke</h2><table class="form-table"><tbody><tr><th>Reusable Blocks</th><td>';
+        echo '<h2>Wiederverwendbare Blöcke &amp; Navigationen</h2><table class="form-table"><tbody><tr><th>Reusable Blocks &amp; Navigationen</th><td>';
         $blWl = (array)($o['block_whitelist'] ?? []);
         if (!empty($blocks)) {
             foreach ($blocks as $bid=>$title) {
                 $ch = in_array($bid,$blWl,true)?'checked':'';
                 echo '<label style="display:block;margin:4px 0"><input type="checkbox" name="block_whitelist[]" value="'.(int)$bid.'" '.$ch.'> '.esc_html($title).' (#'.(int)$bid.')</label>';
             }
-        } else echo '<em>Keine Reusable Blocks gefunden.</em>';
+        } else echo '<em>Keine Reusable Blocks oder Navigationen gefunden.</em>';
         echo '</td></tr></tbody></table>';
 
         // Optionen

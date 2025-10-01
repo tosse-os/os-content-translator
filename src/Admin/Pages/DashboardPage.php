@@ -129,7 +129,7 @@ final class DashboardPage
         echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_jobs" value="1"> Stellenanzeigen</label></p>';
         echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_menu_pages" value="1"> Seiten im gewählten Menü</label></p>';
         echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_extra_pages" value="1"> Standardseiten</label></p>';
-        echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_blocks" value="1"> Reusable Blocks</label></p>';
+        echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_blocks" value="1"> Reusable Blocks &amp; Navigationen</label></p>';
         echo '<p style="margin-top:12px"><label><input type="checkbox" name="osct_force" value="1"> Force: vorhandene Zielversionen trotz "OK" neu übersetzen</label></p>';
         echo '<p>Übersetzt nur die aktivierten Gruppen in die aktiven Zielsprachen.</p>';
         echo '<p><button class="button button-primary">Übersetzung jetzt ausführen</button> ';
@@ -151,10 +151,10 @@ final class DashboardPage
         }
 
         if (!empty($active) && !empty($wlBlocks)) {
-            echo '<h2>Reusable Blocks × Sprachen</h2><table class="widefat striped"><thead><tr><th>Block</th>';
+            echo '<h2>Reusable Blocks &amp; Navigationen × Sprachen</h2><table class="widefat striped"><thead><tr><th>Block</th>';
             foreach ($active as $l) echo '<th>' . esc_html($l) . '</th>';
             echo '</tr></thead><tbody>';
-            $blocks = $this->content->getPostsByIds($wlBlocks, 'wp_block');
+            $blocks = $this->content->getPostsByIds($wlBlocks, ['wp_block', 'wp_navigation']);
             foreach ($blocks as $b) {
                 echo '<tr><td>#' . $b->ID . ' ' . esc_html(get_the_title($b)) . '</td>';
                 foreach ($active as $l) echo '<td>' . $this->badge($this->translator->state($b->ID, $l)) . '</td>';
@@ -183,14 +183,15 @@ final class DashboardPage
         }
 
         if (!empty($wlBlocks)) {
-            $blocks = $this->content->getPostsByIds($wlBlocks, 'wp_block');
+            $blocks = $this->content->getPostsByIds($wlBlocks, ['wp_block', 'wp_navigation']);
             foreach ($blocks as $b) {
                 echo '<tr>';
                 echo '<td>#' . (int)$b->ID . '</td>';
                 echo '<td>' . esc_html(get_the_title($b)) . '</td>';
-                echo '<td><a href="' . esc_url(get_edit_post_link($b->ID)) . '" target="_blank">' . esc_html(get_edit_post_link($b->ID)) . '</a></td>';
-                echo '<td>wp_block</td>';
-                echo '<td>Block</td>';
+                $editLink = get_edit_post_link($b->ID);
+                echo '<td><a href="' . esc_url($editLink) . '" target="_blank">' . esc_html($editLink) . '</a></td>';
+                echo '<td>' . esc_html($b->post_type) . '</td>';
+                echo '<td>' . ($b->post_type === 'wp_navigation' ? 'Navigation' : 'Block') . '</td>';
                 echo '</tr>';
             }
         }
