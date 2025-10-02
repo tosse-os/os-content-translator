@@ -94,30 +94,14 @@ final class DashboardPage
         $defaultLang = $this->langsRepo->default();
         $totalJobs = $this->jobs->countAll();
         $anyTranslated = $this->jobs->countAnyTranslated($active);
-        echo '<h2>Stellenangebote</h2>';
-        echo '<table class="widefat striped"><tbody>';
-        echo '<tr><td>Gesamt</td><td>' . intval($totalJobs) . '</td></tr>';
-        echo '<tr><td>Bereits eingesetzt (mind. 1 Sprache)</td><td>' . intval($anyTranslated) . ' / ' . intval($totalJobs) . ' (' . ($totalJobs ? round($anyTranslated / $totalJobs * 100) : 0) . '%)</td></tr>';
-        echo '</tbody></table>';
-
-        if (!empty($active) && $totalJobs > 0) {
-            echo '<h3>Übersetzungsstand je Zielsprache</h3>';
-            echo '<table class="widefat striped"><thead><tr><th>Sprache</th><th>Übersetzt</th><th>Anteil</th></tr></thead><tbody>';
-            foreach ($active as $l) {
-                if ($l === $defaultLang) continue;
-                $done = $this->jobs->countTranslated($l);
-                $pct = $totalJobs ? round($done / $totalJobs * 100) : 0;
-                echo '<tr><td>' . esc_html($l) . '</td><td>' . intval($done) . ' / ' . intval($totalJobs) . '</td><td>' . $pct . '%</td></tr>';
-            }
-            echo '</tbody></table>';
-        }
 
         echo '<h2>Übersetzung starten</h2>';
         echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
         echo '<input type="hidden" name="action" value="osct_do_translate">';
         wp_nonce_field('osct_do_translate');
-        echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_test" value="1" checked> Testlauf</label></p>';
-        echo '<p style="margin-bottom:8px">Stellenanzeigen-Limit: <select name="osct_jobs_limit">'
+        echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_test" value="1" checked> Testlauf</label><br><span class="description">Verwendet im Testlauf jeweils die nächsten zwei Einträge pro Inhaltstyp, inklusive Stellenanzeigen.</span></p>';
+        echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_jobs" value="1"> Stellenanzeigen</label></p>';
+        echo '<p style="margin:-4px 0 12px 24px">Stellenanzeigen-Limit: <select name="osct_jobs_limit">'
             . '<option value="0" selected>Alle offenen Stellen</option>'
             . '<option value="3">Erste 3</option>'
             . '<option value="10">Erste 10</option>'
@@ -126,7 +110,6 @@ final class DashboardPage
             . '<option value="250">Erste 250</option>'
             . '<option value="500">Erste 500</option>'
             . '</select></p>';
-        echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_jobs" value="1"> Stellenanzeigen</label></p>';
         echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_menu_pages" value="1"> Seiten im gewählten Menü</label></p>';
         echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_extra_pages" value="1"> Standardseiten</label></p>';
         echo '<p style="margin-bottom:8px"><label><input type="checkbox" name="osct_do_blocks" value="1"> Reusable Blocks &amp; Navigationen</label></p>';
@@ -196,6 +179,24 @@ final class DashboardPage
             }
         }
         echo '</tbody></table>';
+
+        echo '<h2>Stellenangebote</h2>';
+        echo '<table class="widefat striped"><tbody>';
+        echo '<tr><td>Gesamt</td><td>' . intval($totalJobs) . '</td></tr>';
+        echo '<tr><td>Bereits eingesetzt (mind. 1 Sprache)</td><td>' . intval($anyTranslated) . ' / ' . intval($totalJobs) . ' (' . ($totalJobs ? round($anyTranslated / $totalJobs * 100) : 0) . '%)</td></tr>';
+        echo '</tbody></table>';
+
+        if (!empty($active) && $totalJobs > 0) {
+            echo '<h3>Übersetzungsstand je Zielsprache</h3>';
+            echo '<table class="widefat striped"><thead><tr><th>Sprache</th><th>Übersetzt</th><th>Anteil</th></tr></thead><tbody>';
+            foreach ($active as $l) {
+                if ($l === $defaultLang) continue;
+                $done = $this->jobs->countTranslated($l);
+                $pct = $totalJobs ? round($done / $totalJobs * 100) : 0;
+                echo '<tr><td>' . esc_html($l) . '</td><td>' . intval($done) . ' / ' . intval($totalJobs) . '</td><td>' . $pct . '%</td></tr>';
+            }
+            echo '</tbody></table>';
+        }
 
         echo '</div>';
     }
