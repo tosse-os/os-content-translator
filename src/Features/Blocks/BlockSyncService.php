@@ -29,15 +29,30 @@ final class BlockSyncService {
                 if ($navPost) $parsed_block['attrs']['ref'] = (int)$navPost;
             }
 
-            if (!empty($attrs['navigationMenuId']) && function_exists('pll_get_term')) {
-                $menu = pll_get_term((int)$attrs['navigationMenuId'], $lang);
-                if ($menu && !is_wp_error($menu)) {
-                    $parsed_block['attrs']['navigationMenuId'] = (int)$menu;
+            $menuIdAttr = null;
+            $menuSlugAttr = null;
 
-                    if (!empty($attrs['navigationMenuSlug'])) {
+            if (!empty($attrs['navigationMenuId'])) {
+                $menuIdAttr = 'navigationMenuId';
+                if (array_key_exists('navigationMenuSlug', $attrs)) {
+                    $menuSlugAttr = 'navigationMenuSlug';
+                }
+            } elseif (!empty($attrs['menuId'])) {
+                $menuIdAttr = 'menuId';
+                if (array_key_exists('menuSlug', $attrs)) {
+                    $menuSlugAttr = 'menuSlug';
+                }
+            }
+
+            if ($menuIdAttr && function_exists('pll_get_term')) {
+                $menu = pll_get_term((int)$attrs[$menuIdAttr], $lang);
+                if ($menu && !is_wp_error($menu)) {
+                    $parsed_block['attrs'][$menuIdAttr] = (int)$menu;
+
+                    if ($menuSlugAttr) {
                         $translatedTerm = get_term($menu, 'nav_menu');
                         if ($translatedTerm && !is_wp_error($translatedTerm) && !empty($translatedTerm->slug)) {
-                            $parsed_block['attrs']['navigationMenuSlug'] = $translatedTerm->slug;
+                            $parsed_block['attrs'][$menuSlugAttr] = $translatedTerm->slug;
                         }
                     }
                 }
